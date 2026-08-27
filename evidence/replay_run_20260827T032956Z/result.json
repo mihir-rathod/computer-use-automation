@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "capability_id": "meridian.open_share",
+  "outputs": {
+    "status": "opened",
+    "confirmation_number": "CN480385"
+  },
+  "business_outcome": null,
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9"
+  ],
+  "started_at": "2026-08-27T03:29:57.379075Z",
+  "finished_at": "2026-08-27T03:31:05.664203Z"
+}

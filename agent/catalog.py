@@ -249,6 +249,47 @@ def _meridian_update_member_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_open_share_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.open_share",
+        version="1.0.0",
+        name="Open a new share for a member",
+        description="Opens a new share (e.g. Regular Shares, Money Market) for an existing "
+                     "member with a given initial deposit, via entry -> review -> post. Like "
+                     "Funds Transfer, the final post step is irreversible and gated on human "
+                     "confirmation -- discovery is expected to reach the review screen and stop "
+                     "there; the commit step gets hand-authored the same way.",
+        goal=(
+            "Search for the member with the given member_id (leave Search by: set to its "
+            "default 'Member Number'), select them, then choose Open New Share. Set the Share "
+            "Type dropdown to the option whose value matches the given share_type, and type the "
+            "given initial_deposit into the deposit field. Click Continue to reach the review "
+            "screen. Check the review screen shows the same share type and deposit, then click "
+            "whichever button actually finalizes/posts opening the share (do not click Cancel). "
+            "The goal is complete once a confirmation of the opened share is visible."
+        ),
+        start_path="/members?next=open-share",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={
+            "member_id": {"type": "string"},
+            "share_type": {"type": "string", "description": "Exact dropdown option value, e.g. 'S0001'."},
+            "initial_deposit": {"type": "number"},
+        }, required=["member_id", "share_type", "initial_deposit"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["opened", "not_found", "validation_error"]},
+            "confirmation_number": {"type": ["string", "null"]},
+        }, required=["status"]),
+        # Provisional -- the real post-confirmation text hasn't been observed yet. Corrected
+        # after the first discovery run's own screenshots show it; discovery itself doesn't
+        # consult success_checkpoint.
+        success_checkpoint=Signal(type=SignalType.TEXT_PRESENT, value="Share"),
+        error_handling=_meridian_error_handling(),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=True),
+        preconditions=Preconditions(requires_capability="meridian.signon", note="Assumes an authenticated operator session."),
+        success_output_defaults={"status": "opened"},
+    )
+
+
 def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
     return CapabilitySpec(
         capability_id="meridian.funds_transfer",
@@ -300,6 +341,7 @@ _CATALOG = {
     "meridian.balance_inquiry": _meridian_balance_inquiry_spec,
     "meridian.update_member": _meridian_update_member_spec,
     "meridian.funds_transfer": _meridian_funds_transfer_spec,
+    "meridian.open_share": _meridian_open_share_spec,
 }
 
 

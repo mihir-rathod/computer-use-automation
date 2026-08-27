@@ -1,0 +1,16 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.open_share",
+  "outputs": {
+    "status": "not_found",
+    "confirmation_number": null
+  },
+  "business_outcome": "not_found",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2"
+  ],
+  "started_at": "2026-08-27T03:31:18.710892Z",
+  "finished_at": "2026-08-27T03:31:18.882259Z"
+}
