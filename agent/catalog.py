@@ -177,6 +177,41 @@ def _meridian_signon_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_balance_inquiry_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.balance_inquiry",
+        version="1.0.0",
+        name="Look up a member and read their balances",
+        description="Covers both 'Member inquiry / selection' and 'Member record / balance' "
+                     "from the brief in one flow, mirroring how mockbank.member_balance_lookup "
+                     "bundles search+read rather than splitting them into two capabilities.",
+        goal=(
+            "Search for the member with the given member_id (leave Search by: set to its "
+            "default 'Member Number'), then select them from the results to open their member "
+            "record. That page has a Name field near the top and a SHARES / BALANCES table "
+            "below it, listing every share the member holds -- some members have many rows. "
+            "Extract the member's full name with output_name 'member_name'. In the table, find "
+            "the FIRST data row (the one directly under the header row) and extract its Share "
+            "ID with output_name 'first_share_id' and its Balance with output_name "
+            "'first_share_balance'. The goal is complete once all three have been extracted."
+        ),
+        start_path="/members",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={"member_id": {"type": "string"}}, required=["member_id"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["found", "not_found"]},
+            "member_name": {"type": ["string", "null"]},
+            "first_share_id": {"type": ["string", "null"]},
+            "first_share_balance": {"type": ["number", "null"]},
+        }, required=["status"]),
+        success_checkpoint=Signal(type=SignalType.TEXT_PRESENT, value="SHARES / BALANCES"),
+        error_handling=_meridian_error_handling(),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.READ_ONLY, requires_confirmation=False),
+        preconditions=Preconditions(requires_capability="meridian.signon", note="Assumes an authenticated operator session."),
+        success_output_defaults={"status": "found"},
+    )
+
+
 def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
     return CapabilitySpec(
         capability_id="meridian.funds_transfer",
@@ -225,6 +260,7 @@ def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
 _CATALOG = {
     "mockbank.member_balance_lookup": _member_balance_lookup_spec,
     "meridian.signon": _meridian_signon_spec,
+    "meridian.balance_inquiry": _meridian_balance_inquiry_spec,
     "meridian.funds_transfer": _meridian_funds_transfer_spec,
 }
 

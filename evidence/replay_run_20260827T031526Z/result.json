@@ -1,0 +1,18 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.balance_inquiry",
+  "outputs": {
+    "status": "not_found",
+    "member_name": null,
+    "first_share_id": null,
+    "first_share_balance": null
+  },
+  "business_outcome": "not_found",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2"
+  ],
+  "started_at": "2026-08-27T03:15:26.643722Z",
+  "finished_at": "2026-08-27T03:15:26.812604Z"
+}
