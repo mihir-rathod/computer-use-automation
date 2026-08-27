@@ -37,6 +37,7 @@
 <h1>Capability Catalog</h1>
 <p class="meta">Every capability currently on disk under <code>/artifacts/</code> -- the exact same list <code>GET /capabilities</code> serves.</p>
 
+<div style="overflow-x:auto;">
 <table>
 <tr><th>capability</th><th>target</th><th>description</th><th>inputs</th><th>risk</th><th>needs confirmation</th></tr>
 {% for c in capabilities %}
@@ -52,5 +53,6 @@
 <tr><td colspan="6"><em>No capabilities recorded yet.</em></td></tr>
 {% endfor %}
 </table>
+</div>
 </body>
 </html>

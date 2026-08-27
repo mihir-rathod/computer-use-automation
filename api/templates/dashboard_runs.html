@@ -43,6 +43,7 @@
 <h1>Run History</h1>
 <p class="meta">Every run under <code>/evidence/</code> -- discovery and replay, newest first. Nothing here is stored separately; this is a read of the same evidence the CLI and API already write.</p>
 
+<div style="overflow-x:auto;">
 <table>
 <tr><th>run</th><th>kind</th><th>capability</th><th>target</th><th>status</th><th>started</th></tr>
 {% for r in runs %}
@@ -62,5 +63,6 @@
 <tr><td colspan="6" class="empty">No runs yet.</td></tr>
 {% endfor %}
 </table>
+</div>
 </body>
 </html>
