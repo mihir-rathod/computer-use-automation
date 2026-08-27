@@ -84,7 +84,16 @@ class ReplayEngine:
                 started_at=started_at, finished_at=datetime.now(UTC),
             ))
 
-        variables = dict(inputs)
+        # Backfill declared-but-not-required input_schema properties the caller omitted, with
+        # an empty string -- found via a real crash: memo is genuinely optional on MERIDIAN's
+        # own Funds Transfer form (no asterisk), but a step's params still reference {{memo}},
+        # and substitute() has no notion of "this template variable is allowed to be missing."
+        # Only fills gaps for properties the artifact itself declares optional; validate_input
+        # above already enforces required ones strictly, so this can't mask a real caller error.
+        variables = {
+            k: "" for k in artifact.input_schema.properties if k not in artifact.input_schema.required
+        }
+        variables.update(inputs)
         restarts = 0
         while True:
             try:
