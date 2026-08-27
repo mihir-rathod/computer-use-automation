@@ -48,6 +48,34 @@ def _read_events(run_dir: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _infer_target(events: list[dict[str, Any]]) -> str | None:
+    """Fallback for evidence recorded before run_start logged target explicitly -- every action
+    against a real page carries that page's URL, which is enough to know which TARGET_PROFILES
+    entry it was."""
+    for e in events:
+        url = e.get("data", {}).get("url")
+        if not url:
+            continue
+        for name, profile in runtime.TARGET_PROFILES.items():
+            if url.startswith(profile["base_url"]):
+                return name
+        return None
+    return None
+
+
+def _infer_discovery_capability(run_dir: Path) -> str | None:
+    """Fallback for discovery evidence recorded before run_start logged capability_id -- a
+    *successful* discovery run also writes artifact.json (cli.py's cmd_discover), which carries
+    it. A stuck/failed discovery run genuinely has no other record of what it was attempting."""
+    artifact_path = run_dir / "artifact.json"
+    if not artifact_path.is_file():
+        return None
+    try:
+        return json.loads(artifact_path.read_text(encoding="utf-8")).get("capability_id")
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_run(run_dir: Path) -> dict[str, Any] | None:
     """One run's summary, derived entirely from its own log.jsonl -- no second source of truth
     to drift from it. `.get(..., default)` throughout: evidence recorded before this sprint's
@@ -65,6 +93,9 @@ def _parse_run(run_dir: Path) -> dict[str, Any] | None:
     ever_paused = any(e.get("event_type") == "pause" for e in events)
 
     capability_id = start_data.get("capability_id")
+    target = start_data.get("target") or _infer_target(events)
+    if capability_id is None and kind == "discovery":
+        capability_id = _infer_discovery_capability(run_dir)
     status = "running"
     escalated = ever_paused
     recovered = False
@@ -97,7 +128,7 @@ def _parse_run(run_dir: Path) -> dict[str, Any] | None:
         "kind": kind,
         "capability_id": capability_id,
         "goal": start_data.get("goal"),
-        "target": start_data.get("target"),
+        "target": target,
         "status": status,
         "escalated": escalated,
         "recovered": recovered,
@@ -116,6 +147,42 @@ def _scan_runs() -> list[dict[str, Any]]:
     runs = [r for d in runtime.EVIDENCE_ROOT.iterdir() if d.is_dir() and (r := _parse_run(d)) is not None]
     runs.sort(key=lambda r: r["started_at"] or 0, reverse=True)
     return runs
+
+
+def _summarize_event(actor: str, event_type: str, data: dict[str, Any]) -> str:
+    """A scannable one-line label for an event -- the full data is still shown underneath (in a
+    collapsed <details>), this is just what makes the timeline actually readable at a glance
+    instead of forcing every raw field (including a dozen nulls per action) to be read to find
+    the one that matters."""
+    if event_type == "action":
+        kind = data.get("action_kind", "?")
+        target = (data.get("target") or {}).get("semantic_description")
+        params = data.get("params") or {}
+        detail = target or params.get("url") or (f'"{params["text"]}"' if "text" in params else None) or params.get("value")
+        ok = "" if data.get("success", True) else f" -- FAILED: {data.get('error')}"
+        return f"{kind}" + (f" -- {detail}" if detail else "") + ok
+    if event_type == "perceive":
+        return f"{data.get('element_count', '?')} elements at {data.get('url', '?')}"
+    if event_type == "pause":
+        return f"paused: {data.get('reason', '?')}"
+    if event_type == "resume":
+        return "resumed"
+    if event_type == "result":
+        bits = [data.get("status", "?")]
+        if data.get("business_outcome"):
+            bits.append(f"outcome={data['business_outcome']}")
+        if data.get("escalated"):
+            bits.append("escalated")
+        if data.get("recovered"):
+            bits.append("recovered")
+        return ", ".join(bits)
+    if event_type == "discovery_result":
+        return f"stop_reason={data.get('stop_reason', '?')}" + (f" -- {data['reasoning']}" if data.get("reasoning") else "")
+    if event_type == "decide":
+        return f"chose {data.get('tool', '?')}({data.get('args', {})})"
+    if event_type == "run_start":
+        return f"{data.get('kind', '?')} of {data.get('capability_id') or data.get('goal') or '?'} against {data.get('target', '?')}"
+    return event_type
 
 
 def _screenshot_url(run_id: str, path: str | None) -> str | None:
@@ -171,12 +238,18 @@ def dashboard_run_detail(request: Request, run_id: str):
 
     events = []
     for e in _read_events(run_dir):
+        actor, event_type = e.get("actor", "?"), e.get("event_type", "?")
         data = dict(e.get("data", {}))
         screenshot = _screenshot_url(run_id, data.get("screenshot") or data.get("error_screenshot"))
+        # Null fields are real noise here -- most events carry a dozen locator/error fields that
+        # only apply to some action kinds; the full untrimmed record is still on disk in
+        # log.jsonl for anyone who needs literally everything.
+        data_nonnull = {k: v for k, v in data.items() if v not in (None, {}, [])}
         events.append({
             "ts": e.get("ts"), "ts_display": _fmt_ts(e.get("ts")),
-            "actor": e.get("actor"), "event_type": e.get("event_type"),
-            "data": data, "screenshot_url": screenshot,
+            "actor": actor, "event_type": event_type,
+            "summary": _summarize_event(actor, event_type, data),
+            "data": data_nonnull, "screenshot_url": screenshot,
         })
     return templates.TemplateResponse(request, "dashboard_run_detail.html", {"run": summary, "events": events})
 

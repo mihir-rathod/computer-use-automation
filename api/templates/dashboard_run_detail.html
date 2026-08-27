@@ -8,6 +8,7 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     max-width: 980px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; line-height: 1.5;
+    background: #ffffff;
   }
   h1 { font-size: 18px; margin-bottom: 4px; font-family: ui-monospace, monospace; }
   .meta { color: #555; font-size: 13px; }
@@ -35,11 +36,20 @@
   .event.human { border-left: 3px solid #b7791e; }
   .event.system { border-left: 3px solid #a5333a; }
   .event.replay, .event.agent { border-left: 3px solid #2a5adf; }
-  .event-head { display: flex; gap: 10px; align-items: baseline; color: #888; font-family: ui-monospace, monospace; font-size: 11px; margin-bottom: 4px; }
+  .event-head { display: flex; gap: 10px; align-items: baseline; color: #888; font-family: ui-monospace, monospace; font-size: 11px; margin-bottom: 5px; }
   .event-head .actor { font-weight: 700; color: #444; text-transform: uppercase; }
   .event-head .kind { color: #2a5adf; }
-  pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border-radius: 5px; padding: 6px 8px; font-size: 11.5px; overflow-x: auto; }
-  img.thumb { max-width: 260px; border: 1px solid #ddd; border-radius: 6px; margin-top: 6px; display: block; cursor: zoom-in; }
+  .event-summary { font-size: 13.5px; color: #1a1a1a; }
+  .event details { margin-top: 6px; }
+  .event summary { cursor: pointer; font-size: 11px; color: #888; user-select: none; }
+  .event summary:hover { color: #2a5adf; }
+  pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border-radius: 5px; padding: 6px 8px; font-size: 11.5px; overflow-x: auto; }
+  img.thumb { max-width: 260px; border: 1px solid #ddd; border-radius: 6px; margin-top: 8px; display: block; cursor: zoom-in; }
+  dl.outputs { margin: 0; font-size: 12.5px; }
+  dl.outputs div { display: flex; gap: 6px; }
+  dl.outputs dt { color: #888; }
+  dl.outputs dt::after { content: ":"; }
+  dl.outputs dd { margin: 0; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -66,7 +76,15 @@
   <div><dt>Steps</dt><dd>{{ run.step_count if run.step_count is not none else "-" }}</dd></div>
   {% if run.business_outcome %}<div><dt>Business outcome</dt><dd>{{ run.business_outcome }}</dd></div>{% endif %}
   {% if run.error_message %}<div><dt>Error</dt><dd>{{ run.error_message }}</dd></div>{% endif %}
-  {% if run.outputs %}<div><dt>Outputs</dt><dd>{{ run.outputs | tojson }}</dd></div>{% endif %}
+  {% if run.outputs %}
+  <div><dt>Outputs</dt><dd>
+    <dl class="outputs">
+      {% for k, v in run.outputs.items() if v is not none %}
+      <div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>
+      {% endfor %}
+    </dl>
+  </dd></div>
+  {% endif %}
 </dl>
 
 <h2>Event timeline ({{ events | length }} events)</h2>
@@ -78,8 +96,14 @@
       <span class="actor">{{ e.actor }}</span>
       <span class="kind">{{ e.event_type }}</span>
     </div>
-    <pre>{{ e.data | tojson(indent=2) }}</pre>
+    <div class="event-summary">{{ e.summary }}</div>
     {% if e.screenshot_url %}<img class="thumb" src="{{ e.screenshot_url }}" alt="screenshot" onclick="window.open(this.src)">{% endif %}
+    {% if e.data %}
+    <details>
+      <summary>raw event data</summary>
+      <pre>{{ e.data | tojson(indent=2) }}</pre>
+    </details>
+    {% endif %}
   </div>
   {% else %}
   <p class="meta"><em>No events recorded.</em></p>

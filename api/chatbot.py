@@ -149,13 +149,18 @@ def _render_result(capability_id: str, result: dict[str, Any]) -> str:
     via the operator console reads identically to an unescalated run unless called out here."""
     status = result["status"]
     outputs = result.get("outputs") or {}
-    details = ", ".join(f"{k}: {v}" for k, v in outputs.items() if v is not None)
-    prefix = "(needed a human to approve on the operator console first) " if result.get("escalated") else ""
+    # One field per line, not comma-joined -- the chat bubble is white-space:pre-wrap, so this
+    # renders as an actual readable list instead of one dense run-on line, which is exactly what
+    # got hard to read once a result carries more than one or two fields.
+    details = "\n".join(f"{k}: {v}" for k, v in outputs.items() if v is not None)
+    prefix = "(needed a human to approve on the operator console first)\n" if result.get("escalated") else ""
 
     if status == "success":
-        return f"{prefix}Done -- {capability_id} completed successfully. {details}".rstrip()
+        head = f"Done -- {capability_id} completed successfully."
+        return f"{prefix}{head}" + (f"\n{details}" if details else "")
     if status == "business_outcome":
-        return f"{prefix}{capability_id} came back as “{result['business_outcome']}”, not a system error. {details}".rstrip()
+        head = f"{capability_id} came back as “{result['business_outcome']}”, not a system error."
+        return f"{prefix}{head}" + (f"\n{details}" if details else "")
 
     err = result.get("error") or {}
     run_id = Path(result["evidence_dir"]).name
@@ -166,9 +171,9 @@ def _render_result(capability_id: str, result: dict[str, Any]) -> str:
     if result.get("escalated"):
         return (
             f"{capability_id} was escalated to a human on the operator console (run {run_id}) but still "
-            f"could not complete: {err.get('message', 'unknown error')}."
+            f"could not complete:\n{err.get('message', 'unknown error')}"
         )
-    return f"{capability_id} could not complete: {err.get('message', 'unknown error')}. Run: {run_id}."
+    return f"{capability_id} could not complete:\n{err.get('message', 'unknown error')}\nRun: {run_id}"
 
 
 def _display_history() -> list[dict[str, str]]:

@@ -8,12 +8,17 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; line-height: 1.5;
+    background: #ffffff;
   }
+  nav.top { display: flex; gap: 4px; margin-bottom: 18px; font-size: 13px; }
+  nav.top a { padding: 6px 12px; border-radius: 6px; text-decoration: none; color: #444; }
+  nav.top a.active { background: #2a5adf; color: white; }
+  nav.top a:not(.active):hover { background: #f0f0f0; }
   h1 { font-size: 20px; margin-bottom: 4px; }
   .meta { color: #555; font-size: 13px; margin-bottom: 16px; }
   .meta code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
   .transcript { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
-  .msg { padding: 10px 14px; border-radius: 8px; font-size: 14px; max-width: 90%; white-space: pre-wrap; }
+  .msg { padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.7; max-width: 90%; white-space: pre-wrap; }
   .msg.user { align-self: flex-end; background: #2a5adf; color: white; }
   .msg.assistant { align-self: flex-start; background: #f0f0f0; color: #1a1a1a; border: 1px solid #e2e2e2; }
   .msg.assistant.pending { color: #6b5f1a; background: #fbf6dd; border-color: #e6d98a; font-style: italic; }
@@ -31,9 +36,10 @@
 </style>
 </head>
 <body>
-<nav style="display:flex;gap:4px;margin-bottom:14px;font-size:13px;">
-  <a href="/dashboard" style="padding:6px 12px;border-radius:6px;text-decoration:none;color:#444;">Dashboard</a>
-  <a href="/dashboard/runs" style="padding:6px 12px;border-radius:6px;text-decoration:none;color:#444;">Run History</a>
+<nav class="top">
+  <a href="/dashboard">Catalog</a>
+  <a href="/dashboard/runs">Run History</a>
+  <a class="active" href="/chat">Chatbot</a>
 </nav>
 <h1>Capability Chatbot</h1>
 <p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for meridian member 100987"</em> or <em>"transfer $5 from 100987-S0001-4 to 100987-MMKT-5 for member 100987"</em>.</p>
