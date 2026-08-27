@@ -16,6 +16,7 @@
   .msg { padding: 10px 14px; border-radius: 8px; font-size: 14px; max-width: 90%; white-space: pre-wrap; }
   .msg.user { align-self: flex-end; background: #2a5adf; color: white; }
   .msg.assistant { align-self: flex-start; background: #f0f0f0; color: #1a1a1a; border: 1px solid #e2e2e2; }
+  .msg.assistant.pending { color: #6b5f1a; background: #fbf6dd; border-color: #e6d98a; font-style: italic; }
   .empty { color: #888; font-size: 13px; font-style: italic; }
   .watch-bar {
     display: flex; align-items: center; gap: 16px; margin-bottom: 12px; padding: 8px 12px;
@@ -36,7 +37,7 @@
 
 <div class="transcript">
   {% for turn in history %}
-    <div class="msg {{ turn.role }}">{{ turn.text }}</div>
+    <div class="msg {{ turn.role }}{% if turn.pending %} pending{% endif %}">{{ turn.text }}</div>
   {% else %}
     <div class="empty">No messages yet -- ask for something.</div>
   {% endfor %}
@@ -55,9 +56,36 @@
     <span class="hint">Show browser pops a real, separate window driving the actual site.</span>
   </div>
   <div class="send-row">
-    <input type="text" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
+    <input type="text" id="msg-input" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
     <button type="submit">Send</button>
   </div>
 </form>
+
+{% if pending %}
+<script>
+  // Polls a lightweight status endpoint instead of a blind fixed-interval reload -- same
+  // pattern the operator console's own auto-refresh already uses. Reloads while a capability
+  // run is still in flight so the live "working" / "paused, needs a human" / final-result text
+  // (computed server-side in _display_history()) actually shows up without a manual refresh;
+  // stops once the poll reports nothing pending, since a fresh page load won't re-run this
+  // script unless {{ pending }} is true again.
+  function isEditingForm() {
+    // Checking focus alone isn't enough -- the message box has autofocus, so it's the active
+    // element on every load even with nothing typed into it yet, which would otherwise block
+    // every single reload forever. Only actual typed content counts as "don't disrupt this".
+    const el = document.activeElement;
+    return el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA") && el.value;
+  }
+  const iv = setInterval(async () => {
+    try {
+      const resp = await fetch("/chat/status");
+      const data = await resp.json();
+      if (isEditingForm()) return;
+      if (!data.pending) { clearInterval(iv); }
+      location.reload();
+    } catch (e) { /* server not reachable mid-refresh -- ignore, try again next tick */ }
+  }, 1500);
+</script>
+{% endif %}
 </body>
 </html>

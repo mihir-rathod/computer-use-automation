@@ -6,6 +6,7 @@ GEMINI_API_KEY, same reasoning as test_discovery_live.py.
 from __future__ import annotations
 
 import os
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,9 +23,15 @@ def _send(message: str, monkeypatch, api_base_url: str, mockbank_base_url: str) 
     monkeypatch.setenv("CAPABILITY_TARGET_BASE_URL_OVERRIDE", mockbank_base_url)
     resp = client.post("/chat", data={"message": message}, follow_redirects=False)
     assert resp.status_code == 303
+    # A capability invoke now runs on a background thread (see api/chatbot.py's chat_send) so
+    # the page returns before it's done -- poll the same status endpoint the page's own
+    # auto-refresh script uses, rather than assuming the result is ready immediately.
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and client.get("/chat/status").json()["pending"]:
+        time.sleep(0.2)
     page = client.get("/chat").text
     # last assistant bubble on the page -- good enough for a single-exchange test
-    return page.rsplit('<div class="msg assistant">', 1)[-1].split("</div>", 1)[0]
+    return page.rsplit('<div class="msg assistant', 1)[-1].split(">", 1)[-1].split("</div>", 1)[0]
 
 
 def test_chatbot_maps_a_real_request_onto_the_right_capability_and_runs_it(monkeypatch, api_base_url, mockbank_base_url):

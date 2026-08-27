@@ -16,11 +16,12 @@ concurrent requests -- no asyncio wrapping needed for something this simple.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from artifacts_lib.storage import list_artifacts
 from runtime import TARGET_PROFILES, ensure_operator_console, run_replay
@@ -50,6 +51,11 @@ class InvokeRequest(BaseModel):
     password: str | None = None
     headed: bool = False
     slow_mo: int = 0
+    evidence_dir: str | None = Field(
+        default=None, description="Pre-computed run id/path -- lets a caller (the chatbot) know "
+                                    "the run's id before it starts, e.g. to link to its operator "
+                                    "console session while still in flight. Defaults to run_replay's own."
+    )
 
 
 @app.get("/capabilities")
@@ -88,6 +94,7 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
             capability_id, body.params,
             target=body.target, base_url=body.base_url, username=body.username, password=body.password,
             headed=body.headed, slow_mo=body.slow_mo,
+            evidence_dir=Path(body.evidence_dir) if body.evidence_dir else None,
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"unknown capability '{capability_id}'")
