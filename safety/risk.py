@@ -32,15 +32,26 @@ _ALWAYS_SAFE_ACTIONS = {ActionType.EXTRACT, ActionType.NAVIGATE, ActionType.WAIT
 # Two tiers, found necessary by pointing this at MERIDIAN CORE: a *commit* keyword
 # ("confirm"/"post"/"delete"/"remove") legitimately means "this action commits something"
 # wherever it appears -- element name or current page path. A *domain-noun* keyword
-# ("transfer"/"withdraw"/"hold"/"close account") only describes what a specific ELEMENT does,
-# never "we are somewhere in this flow": MERIDIAN's own route naming bakes the domain word into
-# every step of a flow (/members/{id}/transfer, .../transfer/review), so matching it against
-# current_path would misclassify the safe "Continue" click that merely reaches the *review*
-# page (nothing posted yet, still cancelable) as irreversible -- before the operator ever sees
-# the review screen. MockBank never exercised this because none of its route segments collide
-# with a domain-noun keyword.
+# ("transfer"/"withdraw"/"hold"/"close account"/"open share") only describes what a specific
+# ELEMENT does, never "we are somewhere in this flow": MERIDIAN's own route naming bakes the
+# domain word into every step of a flow (/members/{id}/transfer, .../transfer/review), so
+# matching it against current_path would misclassify the safe "Continue" click that merely
+# reaches the *review* page (nothing posted yet, still cancelable) as irreversible -- before the
+# operator ever sees the review screen. MockBank never exercised this because none of its route
+# segments collide with a domain-noun keyword.
+#
+# "open share" (not standalone "open") was a real miss, found only by actually running
+# discovery against it, not by inspection: MERIDIAN's real commit button for opening a share is
+# labeled exactly "Open Share" -- no "confirm", no "post" -- so neither existing tier caught it,
+# and an unsupervised discovery run completed a genuinely irreversible action (a real share
+# opened, uncorfirmed) before this was noticed. The two-word phrase, not standalone "open",
+# is what keeps this from colliding with the safe main-menu link "Open New Share" (contains
+# "open" and "share" but not the contiguous phrase "open share") -- same reasoning MockBank's
+# own "open account"/"open sub-account" exclusion above used, just the opposite direction: there
+# the commit button already said "confirm" so excluding the phrase was safe; here the commit
+# button doesn't say "confirm" at all, so the phrase itself has to be the signal.
 _COMMIT_KEYWORDS = ("confirm", "post", "delete", "remove")
-_DOMAIN_KEYWORDS = ("transfer", "withdraw", "close account", "hold")
+_DOMAIN_KEYWORDS = ("transfer", "withdraw", "close account", "hold", "open share")
 
 
 class RiskClassifier:
