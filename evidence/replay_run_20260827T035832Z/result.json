@@ -1,0 +1,16 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.place_hold",
+  "outputs": {
+    "status": "not_found",
+    "confirmation_number": null
+  },
+  "business_outcome": "not_found",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2"
+  ],
+  "started_at": "2026-08-27T03:58:33.513097Z",
+  "finished_at": "2026-08-27T03:58:33.720935Z"
+}

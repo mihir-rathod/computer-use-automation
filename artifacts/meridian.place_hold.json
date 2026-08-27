@@ -1,0 +1,234 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "meridian.place_hold",
+  "version": "1.0.0",
+  "name": "Place a hold on a member's share",
+  "description": "Places a hold on a share for a given reason, via MERIDIAN's entry -> review -> post flow. Doubly gated: irreversible like Funds Transfer/Open New Share (our own confirmation requirement), and additionally restricted to supervisors by MERIDIAN itself -- a teller reaches a real permission_denied business outcome right at the review step, before any commit button even exists for them to see.",
+  "target": {
+    "app_id": "meridian",
+    "surface_type": "web",
+    "base_url": "https://web-sample.interface-hiring.com",
+    "vendor_product": "meridian-core",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "meridian.signon",
+    "note": "Assumes an authenticated operator session. Which operator matters here more than for any other MERIDIAN capability: a teller session hits permission_denied at the review step; only a supervisor session (e.g. super1) can reach and complete the final Apply Hold step."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "member_id": { "type": "string" },
+      "share": { "type": "string", "description": "Exact share id, e.g. '100234-S0001-6'." },
+      "reason_code": { "type": "string", "description": "Exact dropdown option value, e.g. 'FRAUD'." },
+      "notes": { "type": "string" }
+    },
+    "required": ["member_id", "share", "reason_code"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["held", "not_found", "permission_denied", "validation_error"] },
+      "confirmation_number": { "type": ["string", "null"] }
+    },
+    "required": ["status"]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "ACCOUNT HOLD APPLIED",
+    "description": "Corrected against a real confirmed post as super1 -- the provisional guess 'HOLD PLACED' was wrong (the real heading is 'ACCOUNT HOLD APPLIED'), which surfaced as a hard_failure on the first verification attempt: the step-level checkpoint below already matched correctly, so s9 completed, but the mismatched success_checkpoint made the engine re-classify and treat the second post-resume failure as terminal. Fixed by using the real observed text."
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "params": { "url": "/members?next=hold" },
+      "checkpoint": { "type": "text_present", "value": "MEMBER INQUIRY" },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "Member number search field",
+        "locators": [
+          { "strategy": "role", "value": "textbox", "note": "No accessible name on this field; unambiguous only because it's the sole textbox on the search form." },
+          { "strategy": "css", "value": "[name='q']", "note": "Fallback: the HTML name attribute, computed at discovery time." }
+        ]
+      },
+      "params": { "text": "{{member_id}}" },
+      "checkpoint": {
+        "type": "element_value_equals",
+        "target": {
+          "semantic_description": "Member number search field",
+          "locators": [
+            { "strategy": "role", "value": "textbox" },
+            { "strategy": "css", "value": "[name='q']" }
+          ]
+        },
+        "value": "{{member_id}}"
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Search",
+        "locators": [
+          { "strategy": "role", "value": "button[name='Search']", "note": "Computed at discovery time." }
+        ]
+      },
+      "params": {},
+      "checkpoint": { "type": "text_present", "value": "Select" },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Select",
+        "locators": [
+          { "strategy": "role", "value": "link[name='Select']", "note": "Computed at discovery time; unambiguous because member-number search returns exactly one result row." }
+        ]
+      },
+      "params": {},
+      "checkpoint": { "type": "text_present", "value": "PLACE ACCOUNT HOLD" },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "select",
+      "target": {
+        "semantic_description": "Share",
+        "locators": [
+          { "strategy": "role", "value": "combobox", "note": "No accessible name at discovery time." },
+          { "strategy": "css", "value": "[name='share']", "note": "Fallback: HTML name attribute, computed at discovery time." }
+        ]
+      },
+      "params": { "value": "{{share}}" },
+      "checkpoint": {
+        "type": "element_value_equals",
+        "target": {
+          "semantic_description": "Share",
+          "locators": [
+            { "strategy": "css", "value": "[name='share']" }
+          ]
+        },
+        "value": "{{share}}"
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "select",
+      "target": {
+        "semantic_description": "Reason",
+        "locators": [
+          { "strategy": "role", "value": "combobox", "note": "No accessible name at discovery time; ambiguous against the Share combobox unless the CSS fallback is used." },
+          { "strategy": "css", "value": "[name='reason']", "note": "Fallback: HTML name attribute, computed at discovery time." }
+        ]
+      },
+      "params": { "value": "{{reason_code}}" },
+      "checkpoint": {
+        "type": "element_value_equals",
+        "target": {
+          "semantic_description": "Reason",
+          "locators": [
+            { "strategy": "css", "value": "[name='reason']" }
+          ]
+        },
+        "value": "{{reason_code}}"
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "type",
+      "target": {
+        "semantic_description": "Notes",
+        "locators": [
+          { "strategy": "role", "value": "textbox", "note": "No accessible name at discovery time." },
+          { "strategy": "css", "value": "[name='notes']", "note": "Fallback: HTML name attribute, computed at discovery time." }
+        ]
+      },
+      "params": { "text": "{{notes}}" },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s8",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          { "strategy": "role", "value": "button[name='Continue']", "note": "Computed at discovery time. For a teller session, classify() catches the resulting is not authorized to perform this function page as a permission_denied business outcome right here -- MERIDIAN checks supervisor authorization at review time for this capability, not just at the final commit like Funds Transfer/Open New Share. Confirmed via two separate discovery runs: as teller1, gave up immediately after this click with the real 'is not authorized to perform this function' page; as super1, this click correctly landed on the real CONFIRM ACCOUNT HOLD review screen instead." }
+        ]
+      },
+      "params": {},
+      "checkpoint": { "type": "text_present", "value": "CONFIRM ACCOUNT HOLD" },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s9",
+      "action": "click",
+      "target": {
+        "semantic_description": "Apply Hold",
+        "locators": [
+          { "strategy": "role", "value": "button[name='Apply Hold']", "note": "Hand-authored, not discovered as-is -- even as super1, discovery correctly could not click this button itself (blocked: irreversible action requires confirmation), same reason as every other irreversible commit step in this repo. The review page itself also labels this 'IRREVERSIBLE ACTION' in bold, independent of anything our own system says." }
+        ]
+      },
+      "params": {},
+      "checkpoint": { "type": "text_present", "value": "ACCOUNT HOLD APPLIED" },
+      "risk_level": "irreversible",
+      "idempotent": false
+    },
+    {
+      "step_id": "s10",
+      "action": "extract",
+      "target": {
+        "semantic_description": "Confirmation number",
+        "locators": [
+          { "strategy": "xpath", "value": "//td[normalize-space(text())='Confirmation:']/following-sibling::td[1]", "note": "Same proven pattern as funds_transfer/open_share's real success pages -- verified against a real applied hold (heading 'ACCOUNT HOLD APPLIED', 'Confirmation:' | 'CN480386' as sibling <td> cells)." }
+        ]
+      },
+      "params": {},
+      "output_binding": "confirmation_number",
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      { "signal": { "type": "text_present", "value": "RECORD NOT FOUND" }, "outcome": "not_found", "output_field": "status" },
+      { "signal": { "type": "text_present", "value": "No member records matched your search." }, "outcome": "not_found", "output_field": "status" },
+      { "signal": { "type": "text_present", "value": "is not authorized to perform this function" }, "outcome": "permission_denied", "output_field": "status" },
+      { "signal": { "type": "text_present", "value": "TRANSACTION REJECTED" }, "outcome": "validation_error", "output_field": "status" },
+      { "signal": { "type": "text_present", "value": "could not be validated" }, "outcome": "validation_error", "output_field": "status" }
+    ],
+    "recoverable": [
+      { "signal": { "type": "text_present", "value": "YOUR SESSION HAS TIMED OUT" }, "action": "reauthenticate_and_resume" },
+      { "signal": { "type": "text_present", "value": "SCHEDULED MAINTENANCE IN PROGRESS" }, "action": "retry", "max_attempts": 3, "backoff_ms": 1000 }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": true
+  },
+  "success_output_defaults": { "status": "held" },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest + hand-written final step",
+    "discovery_run_id": "discovery_run_20260827T033539Z (super1) / discovery_run_20260827T033311Z (teller1, confirms the natural permission_denied path)",
+    "created_at": "2026-08-27T00:00:00Z",
+    "reviewed": true,
+    "note": "Steps s1-s8 are exactly what discovery recorded (real resolved locators, from the super1 run that could reach the review screen). A teller1 run of the same capability was recorded separately specifically to confirm the natural permission_denied path -- MERIDIAN checks supervisor authorization at the review step itself, not just at the final commit, so no new schema was needed for the two-role behavior, just the existing is not authorized to perform this function business_outcome rule already in _meridian_error_handling(). s9 is hand-authored, same reasoning as every other irreversible commit step in this repo -- discovery correctly could not click it even as super1. success_checkpoint is provisional pending a real confirmed post as a supervisor."
+  }
+}
