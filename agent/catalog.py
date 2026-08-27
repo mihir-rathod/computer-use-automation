@@ -98,7 +98,7 @@ def _meridian_error_handling() -> ErrorHandling:
         business_outcomes=[
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="RECORD NOT FOUND"), outcome="not_found"),
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="No member records matched your search."), outcome="not_found"),
-            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="SUPERVISOR OVERRIDE REQUIRED"), outcome="permission_denied"),
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="is not authorized to perform this function"), outcome="permission_denied"),
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="TRANSACTION REJECTED"), outcome="validation_error"),
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="could not be validated"), outcome="validation_error"),
         ],
@@ -290,6 +290,50 @@ def _meridian_open_share_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_place_hold_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.place_hold",
+        version="1.0.0",
+        name="Place a hold on a member's share",
+        description="Places a hold on a share for a given reason, via entry -> review -> post. "
+                     "Doubly gated: irreversible like Funds Transfer/Open New Share (our own "
+                     "confirmation requirement), and additionally restricted to supervisors by "
+                     "MERIDIAN itself -- a teller attempting the final post gets a real "
+                     "permission_denied business outcome from the target, independent of our "
+                     "own safety gate. Recorded as teller1 on purpose: the discovered artifact's "
+                     "\"official\" behavior for a non-supervisor is the denial itself.",
+        goal=(
+            "Search for the member with the given member_id (leave Search by: set to its "
+            "default 'Member Number'), select them, then choose Place Account Hold. Set the "
+            "Share dropdown to the option whose value matches the given share, set the Reason "
+            "dropdown to the option whose value matches the given reason_code, and type the "
+            "given notes into the notes field. Click Continue to reach the review screen. Check "
+            "the review screen shows the same share and reason, then click whichever button "
+            "actually finalizes/posts the hold (do not click Cancel). The goal is complete once "
+            "either a confirmation of the placed hold, or a message that a supervisor is "
+            "required, is visible."
+        ),
+        start_path="/members?next=hold",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={
+            "member_id": {"type": "string"},
+            "share": {"type": "string", "description": "Exact share id, e.g. '101555-S0001'."},
+            "reason_code": {"type": "string", "description": "Exact dropdown option value, e.g. 'FRAUD'."},
+            "notes": {"type": "string"},
+        }, required=["member_id", "share", "reason_code"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["held", "not_found", "permission_denied", "validation_error"]},
+        }, required=["status"]),
+        # Provisional -- corrected once a real confirmed post has actually been observed (same
+        # pattern as funds_transfer/open_share).
+        success_checkpoint=Signal(type=SignalType.TEXT_PRESENT, value="ACCOUNT HOLD APPLIED"),
+        error_handling=_meridian_error_handling(),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=True),
+        preconditions=Preconditions(requires_capability="meridian.signon", note="Assumes an authenticated operator session."),
+        success_output_defaults={"status": "held"},
+    )
+
+
 def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
     return CapabilitySpec(
         capability_id="meridian.funds_transfer",
@@ -342,6 +386,7 @@ _CATALOG = {
     "meridian.update_member": _meridian_update_member_spec,
     "meridian.funds_transfer": _meridian_funds_transfer_spec,
     "meridian.open_share": _meridian_open_share_spec,
+    "meridian.place_hold": _meridian_place_hold_spec,
 }
 
 

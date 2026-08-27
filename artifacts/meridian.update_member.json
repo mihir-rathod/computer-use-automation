@@ -346,7 +346,7 @@
       {
         "signal": {
           "type": "text_present",
-          "value": "SUPERVISOR OVERRIDE REQUIRED",
+          "value": "is not authorized to perform this function",
           "target": null,
           "description": null
         },
