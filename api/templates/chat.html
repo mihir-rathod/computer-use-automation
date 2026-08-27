@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Capability Chatbot</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .meta { color: #555; font-size: 13px; margin-bottom: 16px; }
+  .meta code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
+  .transcript { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+  .msg { padding: 10px 14px; border-radius: 8px; font-size: 14px; max-width: 90%; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #2a5adf; color: white; }
+  .msg.assistant { align-self: flex-start; background: #f0f0f0; color: #1a1a1a; border: 1px solid #e2e2e2; }
+  .empty { color: #888; font-size: 13px; font-style: italic; }
+  form.send { display: flex; gap: 8px; }
+  form.send input[type=text] { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  form.send button { padding: 10px 18px; border: none; border-radius: 6px; background: #2a5adf; color: white; font-weight: 600; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Capability Chatbot</h1>
+<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for meridian member 100987"</em> or <em>"transfer $5 from 100987-S0001-4 to 100987-MMKT-5 for member 100987"</em>.</p>
+
+<div class="transcript">
+  {% for turn in history %}
+    <div class="msg {{ turn.role }}">{{ turn.text }}</div>
+  {% else %}
+    <div class="empty">No messages yet -- ask for something.</div>
+  {% endfor %}
+</div>
+
+<form class="send" method="post" action="/chat">
+  <input type="text" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
+  <button type="submit">Send</button>
+</form>
+</body>
+</html>

@@ -56,6 +56,36 @@ def mockbank_base_url():
 
 
 @pytest.fixture(scope="session")
+def api_base_url():
+    """Same pattern as mockbank_base_url -- the capability API in-process on a free port, for
+    tests that need a real server (e.g. the chatbot's self-call to its own /invoke endpoint,
+    which is a genuine HTTP round-trip, not a direct function call -- see api/chatbot.py)."""
+    from api.app import app as api_app
+
+    port = _free_port()
+    config = uvicorn.Config(api_app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    base_url = f"http://127.0.0.1:{port}"
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            httpx.get(f"{base_url}/capabilities", timeout=0.5)
+            break
+        except httpx.ConnectError:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError("capability API test server did not start in time")
+
+    yield base_url
+
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture(scope="session")
 def browser():
     from playwright.sync_api import sync_playwright
 

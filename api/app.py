@@ -1,8 +1,8 @@
 """The capability API -- ASSIGNMENT_ORIGINAL.md 3.2: "a callable catalog... an agent invokes a
 capability by name with typed args and gets a structured result back, without knowing anything
-about the underlying UI." This is also the app the chatbot (Phase 4) and dashboard (Phase 5) get
-mounted onto -- one process, one port, for the whole demoable surface, per the brief's own
-"simpler is fine if justified" and "we do not reward... scaling infrastructure."
+about the underlying UI." This is also the app the chatbot (api/chatbot.py, mounted below) and
+dashboard (Phase 5) live on -- one process, one port, for the whole demoable surface, per the
+brief's own "simpler is fine if justified" and "we do not reward... scaling infrastructure."
 
 Every invocation calls runtime.run_replay() -- the exact same execution path cli.py's `replay`
 command uses -- so this can never become a second implementation of "how do I run a capability",
@@ -18,13 +18,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from artifacts_lib.storage import list_artifacts
 from runtime import TARGET_PROFILES, run_replay
 
+# Before importing api.chatbot: GeminiClient is only constructed inside a request handler (not
+# at import time), but load here anyway so GEMINI_API_KEY is guaranteed present before this
+# process ever serves a request, not just before the first chat message happens to arrive.
+load_dotenv()
+
+from api.chatbot import router as chatbot_router
+
 app = FastAPI(title="Capability API")
+app.include_router(chatbot_router)
 
 
 class InvokeRequest(BaseModel):
