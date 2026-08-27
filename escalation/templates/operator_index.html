@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Operator Console</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 900px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .meta { color: #555; font-size: 14px; margin-bottom: 16px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 10px; color: white; font-weight: 600; font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+  .pill.automation { background: #2a7a4a; }
+  .pill.paused { background: #c0392b; }
+  .pill.human_active { background: #b7791e; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4px; font-size: 13px; }
+  td, th { border: 1px solid #e2e2e2; padding: 8px 10px; text-align: left; }
+  th { background: #f7f7f7; font-weight: 600; }
+  tr:nth-child(even) { background: #fafafa; }
+  a.session-link { color: #2a5adf; text-decoration: none; font-weight: 600; }
+  a.session-link:hover { text-decoration: underline; }
+  .empty { color: #888; font-style: italic; padding: 16px 0; }
+</style>
+</head>
+<body>
+<h1>Operator Console</h1>
+<p class="meta">Every run currently registered -- open a session to see what it's stuck on, and to act on it. This page refreshes on its own.</p>
+
+<table>
+<tr><th>session</th><th>capability</th><th>status</th><th>reason</th></tr>
+{% for s in sessions %}
+<tr>
+  <td><a class="session-link" href="/operator/{{ s.session_id }}">{{ s.session_id }}</a></td>
+  <td>{{ s.capability_id or "-" }}</td>
+  <td><span class="pill {{ s.mode }}">{{ s.mode }}</span></td>
+  <td>{{ s.pause_reason or "" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="empty">No runs currently in flight.</td></tr>
+{% endfor %}
+</table>
+
+<script>
+  setInterval(() => location.reload(), 3000);
+</script>
+</body>
+</html>

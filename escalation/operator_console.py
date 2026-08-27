@@ -14,12 +14,26 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from artifacts_lib.schema import ActionType
-from escalation.registry import get_session
+from escalation.registry import get_session, list_sessions
 from escalation.session_manager import SessionMode
 from surface.base import Action
 
 app = FastAPI(title="Operator Console")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+@app.get("/operator", response_class=HTMLResponse)
+async def operator_index(request: Request):
+    """The one predictable entry point -- ASSIGNMENT_ORIGINAL.md 3.3/3.6: once the chatbot (not
+    just the CLI, which prints each run's id to its own terminal) is what's starting runs, a
+    person watching the chat page has no way to learn a specific run's id while it's paused.
+    This lists whatever's currently registered so they can land on the right session without
+    needing it in advance."""
+    sessions = [
+        {"session_id": s.session_id, "capability_id": s.capability_id, "mode": s.snapshot()["mode"], "pause_reason": s.snapshot()["pause_reason"]}
+        for s in list_sessions()
+    ]
+    return templates.TemplateResponse(request, "operator_index.html", {"sessions": sessions})
 
 
 @app.get("/operator/{session_id}", response_class=HTMLResponse)

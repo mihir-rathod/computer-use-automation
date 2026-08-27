@@ -73,6 +73,14 @@ class ReplayEngine:
         # human instead of failing immediately -- exactly once per step (see
         # _run_step_with_recovery's depth==0 guard), ASSIGNMENT_ORIGINAL.md 3.6.
         self.session_manager = session_manager
+        # Accumulate, never reset mid-run: _reauthenticate() below calls self.run() recursively
+        # on this same instance for the login sub-capability, and the outer call's final result
+        # must still reflect anything that happened before reauthentication kicked in. Set only
+        # to True at the moment each condition actually fires (ASSIGNMENT_ORIGINAL.md 3.4's
+        # dashboard needs "recoverable"/"escalated" as run statuses in their own right, distinct
+        # from the underlying ReplayStatus).
+        self._escalated = False
+        self._recovered = False
 
     def run(self, artifact: Artifact, inputs: dict[str, Any]) -> ReplayResult:
         started_at = datetime.now(UTC)
@@ -153,6 +161,7 @@ class ReplayEngine:
                 if self.session_manager is not None:
                     self.session_manager.update_observed(self.surface.perceive())
                     self.session_manager.pause(reason="all steps completed but success_checkpoint was not met", step_id=None)
+                    self._escalated = True
                     if not self.surface.check_signal(substitute_signal(artifact.success_checkpoint, variables)):
                         raise _HardFailure(ReplayError(message="success_checkpoint still not met after human intervention"), completed)
                     return completed, outputs
@@ -203,6 +212,7 @@ class ReplayEngine:
         if self.session_manager is not None and depth == 0:
             self.session_manager.update_observed(self.surface.perceive())
             self.session_manager.pause(reason=failure_message, step_id=step.step_id)
+            self._escalated = True
 
             # Don't blindly redo the original action on resume -- the human may already have
             # performed it manually (or something equivalent) via the operator console. Check
@@ -236,6 +246,7 @@ class ReplayEngine:
                     message="session expired after a non-idempotent step already completed -- cannot safely auto-resume",
                 ), completed_so_far)
             self._reauthenticate(artifact)
+            self._recovered = True
             raise _RestartArtifact()
 
         recovered = self._apply_bounded_recovery(rule, step, variables)
@@ -244,6 +255,7 @@ class ReplayEngine:
                 step_id=step.step_id if step else None,
                 message=f"recovery action '{rule.action.value}' did not clear the triggering condition within {rule.max_attempts} attempt(s)",
             ), completed_so_far)
+        self._recovered = True
 
     def _classify(self, artifact: Artifact, variables: dict[str, Any]):
         for rule in artifact.error_handling.business_outcomes:
@@ -286,6 +298,8 @@ class ReplayEngine:
         return outputs
 
     def _finish(self, artifact: Artifact, started_at: datetime, result: ReplayResult) -> ReplayResult:
+        result.escalated = self._escalated
+        result.recovered = self._recovered
         if self.evidence_logger is not None:
             self.evidence_logger.log(
                 "replay", "result",
@@ -293,6 +307,7 @@ class ReplayEngine:
                 outputs=result.outputs, business_outcome=result.business_outcome,
                 error=result.error.model_dump() if result.error else None,
                 steps_completed=result.steps_completed,
+                escalated=result.escalated, recovered=result.recovered,
                 duration_s=(result.finished_at - started_at).total_seconds(),
             )
         return result

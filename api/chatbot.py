@@ -44,6 +44,15 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 def _self_base_url() -> str:
     return os.environ.get("CAPABILITY_API_BASE_URL", "http://127.0.0.1:8020")
 
+
+# The operator console runs as its own server (runtime.ensure_operator_console, port 8010 by
+# default -- same port every _invoke() call below implicitly uses, since InvokeRequest has no
+# operator_port override). Surfaced as a persistent link on the chat page itself: once the
+# chatbot (not the CLI, which prints each run's id to its own terminal) is what's starting runs,
+# there's no other way for someone watching the chat page to find where to go approve a pause.
+def _operator_console_url() -> str:
+    return os.environ.get("OPERATOR_CONSOLE_BASE_URL", "http://127.0.0.1:8010") + "/operator"
+
 _JSON_TO_GEMINI_TYPE = {"string": "STRING", "number": "NUMBER", "integer": "INTEGER", "boolean": "BOOLEAN"}
 
 SYSTEM_INSTRUCTION = (
@@ -116,27 +125,40 @@ def _invoke(capability_id: str, args: dict[str, Any], target: str) -> dict[str, 
 def _render_result(capability_id: str, result: dict[str, Any]) -> str:
     """Plain-language rendering of a structured invoke response -- a template, not a second LLM
     call, per the brief's "keep it thin" instruction. Always surfaces the real structured
-    values (confirmation numbers, balances, the actual error), never just a vague "done"."""
+    values (confirmation numbers, balances, the actual error), never just a vague "done".
+
+    ASSIGNMENT_ORIGINAL.md 3.3 asks the chatbot to "report the escalation in plain language" as
+    a distinct outcome, not just success/business_outcome/error -- a run a human had to approve
+    via the operator console reads identically to an unescalated run unless called out here."""
     status = result["status"]
     outputs = result.get("outputs") or {}
     details = ", ".join(f"{k}: {v}" for k, v in outputs.items() if v is not None)
+    prefix = "(needed a human to approve on the operator console first) " if result.get("escalated") else ""
 
     if status == "success":
-        return f"Done -- {capability_id} completed successfully. {details}".rstrip()
+        return f"{prefix}Done -- {capability_id} completed successfully. {details}".rstrip()
     if status == "business_outcome":
-        return f"{capability_id} came back as “{result['business_outcome']}”, not a system error. {details}".rstrip()
+        return f"{prefix}{capability_id} came back as “{result['business_outcome']}”, not a system error. {details}".rstrip()
 
     err = result.get("error") or {}
     run_id = Path(result["evidence_dir"]).name
-    return (
-        f"{capability_id} could not complete: {err.get('message', 'unknown error')}. "
-        f"If this needed a human, it's paused for escalation -- check the operator console for run {run_id}."
-    )
+    # By the time a response comes back at all, any pause already got resolved (see chat_send's
+    # TimeoutException handling below for the *still paused* case) -- so this is a definitive
+    # outcome, not "it's paused right now"; escalated just means a human already tried and it
+    # still didn't clear.
+    if result.get("escalated"):
+        return (
+            f"{capability_id} was escalated to a human on the operator console (run {run_id}) but still "
+            f"could not complete: {err.get('message', 'unknown error')}."
+        )
+    return f"{capability_id} could not complete: {err.get('message', 'unknown error')}. Run: {run_id}."
 
 
 @router.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request):
-    return templates.TemplateResponse(request, "chat.html", {"history": _HISTORY, "settings": _SETTINGS})
+    return templates.TemplateResponse(request, "chat.html", {
+        "history": _HISTORY, "settings": _SETTINGS, "operator_console_url": _operator_console_url(),
+    })
 
 
 @router.post("/chat")
@@ -170,6 +192,16 @@ def chat_send(message: str = Form(...), headed: bool = Form(False), slow_mo: int
             try:
                 result = _invoke(artifact.capability_id, dict(fn.args), artifact.target.app_id)
                 _HISTORY.append({"role": "assistant", "text": _render_result(artifact.capability_id, result)})
+            except httpx.TimeoutException:
+                # /invoke blocks synchronously through the entire pause-and-escalate wait (same
+                # control-transfer model the CLI/operator console already use -- see
+                # SessionManager.pause()'s docstring). If a human hasn't approved within the
+                # client timeout, the run is still genuinely in progress on the live site, not
+                # unreachable -- distinguish that from a real connectivity failure below.
+                _HISTORY.append({"role": "assistant", "text": (
+                    f"{artifact.capability_id} is paused, waiting on a human to approve on the operator "
+                    f"console -- it hasn't finished yet. Approve it there, then ask me again."
+                )})
             except httpx.HTTPError as exc:
                 _HISTORY.append({"role": "assistant", "text": f"Couldn't reach the capability API: {exc}"})
 

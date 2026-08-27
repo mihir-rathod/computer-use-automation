@@ -34,5 +34,11 @@ class ReplayResult(BaseModel):
     business_outcome: str | None = None
     error: ReplayError | None = None
     steps_completed: list[str] = Field(default_factory=list)
+    escalated: bool = Field(
+        default=False, description="A human paused and acted via the operator console during this run."
+    )
+    recovered: bool = Field(
+        default=False, description="A known recoverable condition fired and was auto-recovered (no human)."
+    )
     started_at: datetime
     finished_at: datetime

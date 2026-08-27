@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from artifacts_lib.storage import list_artifacts
-from runtime import TARGET_PROFILES, run_replay
+from runtime import TARGET_PROFILES, ensure_operator_console, run_replay
 
 # Before importing api.chatbot: GeminiClient is only constructed inside a request handler (not
 # at import time), but load here anyway so GEMINI_API_KEY is guaranteed present before this
@@ -34,6 +34,12 @@ from api.chatbot import router as chatbot_router
 
 app = FastAPI(title="Capability API")
 app.include_router(chatbot_router)
+
+# Started here, not left to the first invoke's own lazy start (runtime.run_replay ->
+# ensure_operator_console): the chatbot page links to this console as soon as it loads (see
+# api/chatbot.py's _operator_console_url()), and that link needs to actually work before anyone
+# has triggered a run, not just after.
+ensure_operator_console(8010)
 
 
 class InvokeRequest(BaseModel):
@@ -93,5 +99,7 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
         "business_outcome": result.business_outcome,
         "error": result.error.model_dump() if result.error else None,
         "steps_completed": result.steps_completed,
+        "escalated": result.escalated,
+        "recovered": result.recovered,
         "evidence_dir": str(evidence_dir),
     }
