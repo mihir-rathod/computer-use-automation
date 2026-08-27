@@ -1,0 +1,15 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.update_member",
+  "outputs": {
+    "status": "not_found"
+  },
+  "business_outcome": "not_found",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2"
+  ],
+  "started_at": "2026-08-27T03:22:48.388202Z",
+  "finished_at": "2026-08-27T03:22:48.555208Z"
+}

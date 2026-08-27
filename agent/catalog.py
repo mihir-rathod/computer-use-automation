@@ -212,6 +212,43 @@ def _meridian_balance_inquiry_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_update_member_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.update_member",
+        version="1.0.0",
+        name="Update a member's contact information",
+        description="Updates email, phone, and mailing address for a member. Single-step post "
+                     "straight to /update -- unlike Funds Transfer/Open New Share/Place Hold, "
+                     "this one has no review screen and isn't inherently irreversible (it can "
+                     "be corrected by updating again), so it's expected to discover cleanly "
+                     "end to end with no confirmation gate.",
+        goal=(
+            "Search for the member with the given member_id (leave Search by: set to its "
+            "default 'Member Number'), select them, then choose Update Member Information. The "
+            "Email, Phone, and Address fields are pre-filled with the member's current values -- "
+            "clear each field completely first, then type the given new value into it. Click "
+            "the button that saves the changes (do not click Cancel). The goal is complete once "
+            "the update is confirmed."
+        ),
+        start_path="/members?next=update",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={
+            "member_id": {"type": "string"},
+            "email": {"type": "string"},
+            "phone": {"type": "string"},
+            "address": {"type": "string"},
+        }, required=["member_id", "email", "phone", "address"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["updated", "not_found", "validation_error"]},
+        }, required=["status"]),
+        success_checkpoint=Signal(type=SignalType.TEXT_PRESENT, value="MEMBER INFORMATION UPDATED"),
+        error_handling=_meridian_error_handling(),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=False),
+        preconditions=Preconditions(requires_capability="meridian.signon", note="Assumes an authenticated operator session."),
+        success_output_defaults={"status": "updated"},
+    )
+
+
 def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
     return CapabilitySpec(
         capability_id="meridian.funds_transfer",
@@ -261,6 +298,7 @@ _CATALOG = {
     "mockbank.member_balance_lookup": _member_balance_lookup_spec,
     "meridian.signon": _meridian_signon_spec,
     "meridian.balance_inquiry": _meridian_balance_inquiry_spec,
+    "meridian.update_member": _meridian_update_member_spec,
     "meridian.funds_transfer": _meridian_funds_transfer_spec,
 }
 
