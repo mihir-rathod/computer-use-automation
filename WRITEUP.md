@@ -187,8 +187,10 @@ not blank out its own operational output.
 - **Automated MERIDIAN coverage is representative, not exhaustive** — one business-outcome run,
   one recoverable-condition run, one escalation, through the API, not every capability × every
   condition. Next: extend the same pattern to the remaining capabilities.
-- **`pytest` runs against the live fixtures leave real `evidence/` directories behind**, cleaned
-  up manually throughout this sprint. Next: a fixture that redirects `EVIDENCE_ROOT` to
-  `tmp_path` for test-triggered runs.
+- **`pytest` runs against the live fixtures leave real `evidence/` directories behind.** The live
+  tests deliberately call the same `run_replay()`/discovery code real demo runs use, so they
+  write into the repo's real `/evidence/` folder too -- 31 directories there right now, cleaned
+  up by hand this sprint. Next: a fixture that redirects `EVIDENCE_ROOT` to `tmp_path` for
+  test-triggered runs.
 - **The dashboard is read-only with no access control** — fine for a demo, not for production
   data even under the "keep it visible" redaction decision above; would need real auth first.
