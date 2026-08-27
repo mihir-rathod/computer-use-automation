@@ -73,6 +73,45 @@ def _mockbank_error_handling() -> ErrorHandling:
     )
 
 
+def _meridian_error_handling() -> ErrorHandling:
+    """MERIDIAN's six named runtime conditions (recon against the live site, not guessed):
+    three business outcomes with clean, distinct text; a session timeout that renders inline at
+    the *current* URL rather than redirecting (so it's a text signal, not REDIRECTED_TO, unlike
+    MockBank's); a maintenance interstitial whose own "Continue" link goes to /menu rather than
+    back to the page that triggered it, so RETRY against the original action is the right
+    recovery here, not dismiss_and_continue (which assumes landing back on the intended page);
+    and a hard application error that offers no continue/retry at all, deliberately left with no
+    recoverable rule so it falls through to hard failure/escalation, matching the real UI.
+
+    Two different pairs map to the same outcome, not one signal each -- MERIDIAN renders the
+    *injected* condition differently from the equivalent *natural* one in both cases found so
+    far. "TRANSACTION REJECTED" is the injected/generic 400 rendering, but a real business-rule
+    rejection (found live -- attempting to transfer from a share on HOLD) renders as "The
+    transaction could not be validated:" plus a bulleted reason. Likewise "RECORD NOT FOUND" is
+    the injected rendering (a direct GET to a member url with ?inject=notfound), but a natural
+    zero-result search (found live -- searching a member number that doesn't exist) renders as
+    "No member records matched your search." on the search page itself. Worth expecting this
+    pattern to repeat for the other two capabilities' natural error text, not assuming the
+    injected copy is the only real-world rendering.
+    """
+    return ErrorHandling(
+        business_outcomes=[
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="RECORD NOT FOUND"), outcome="not_found"),
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="No member records matched your search."), outcome="not_found"),
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="SUPERVISOR OVERRIDE REQUIRED"), outcome="permission_denied"),
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="TRANSACTION REJECTED"), outcome="validation_error"),
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="could not be validated"), outcome="validation_error"),
+        ],
+        recoverable=[
+            RecoverableRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="YOUR SESSION HAS TIMED OUT"), action=RecoveryAction.REAUTHENTICATE_AND_RESUME),
+            RecoverableRule(
+                signal=Signal(type=SignalType.TEXT_PRESENT, value="SCHEDULED MAINTENANCE IN PROGRESS"),
+                action=RecoveryAction.RETRY, max_attempts=3, backoff_ms=1000,
+            ),
+        ],
+    )
+
+
 def _member_balance_lookup_spec(base_url: str) -> CapabilitySpec:
     return CapabilitySpec(
         capability_id="mockbank.member_balance_lookup",
@@ -138,9 +177,55 @@ def _meridian_signon_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_funds_transfer_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.funds_transfer",
+        version="1.0.0",
+        name="Transfer funds between a member's shares",
+        description="Moves money from one share to another for a given member, via MERIDIAN's "
+                     "entry -> review -> post confirmation flow. The final post step is "
+                     "irreversible and gated on human confirmation.",
+        goal=(
+            "Search for the member with the given member_id (leave Search by: set to its "
+            "default 'Member Number'), then select them from the results -- this should land "
+            "directly on the Funds Transfer form for that member. Set the From Share dropdown "
+            "to the option whose value matches the given from_share, and the To Share dropdown "
+            "to the option whose value matches the given to_share. Type the given amount into "
+            "the Amount field and the given memo into the Memo field. Click Continue to reach "
+            "the review screen. Check the review screen shows the same from/to/amount, then "
+            "click whichever button actually finalizes/posts the transfer (do not click Cancel "
+            "or go back). The goal is complete once a confirmation of the posted transfer is "
+            "visible."
+        ),
+        start_path="/members?next=transfer",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={
+            "member_id": {"type": "string"},
+            "from_share": {"type": "string", "description": "Exact share id, e.g. '100987-S0001'."},
+            "to_share": {"type": "string", "description": "Exact share id, e.g. '100987-S0070'."},
+            "amount": {"type": "number"},
+            "memo": {"type": "string"},
+        }, required=["member_id", "from_share", "to_share", "amount"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["posted", "not_found", "permission_denied", "validation_error"]},
+            "confirmation_number": {"type": ["string", "null"]},
+        }, required=["status"]),
+        # Provisional -- the real post-confirmation text hasn't been observed yet (recon
+        # couldn't safely submit a real transfer). Corrected immediately after the first
+        # discovery run's own screenshots show the actual page; discovery itself doesn't
+        # consult success_checkpoint, only replay does, so this doesn't block the spike.
+        success_checkpoint=Signal(type=SignalType.TEXT_PRESENT, value="Transfer"),
+        error_handling=_meridian_error_handling(),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=True),
+        preconditions=Preconditions(requires_capability="meridian.signon", note="Assumes an authenticated operator session."),
+        success_output_defaults={"status": "posted"},
+    )
+
+
 _CATALOG = {
     "mockbank.member_balance_lookup": _member_balance_lookup_spec,
     "meridian.signon": _meridian_signon_spec,
+    "meridian.funds_transfer": _meridian_funds_transfer_spec,
 }
 
 

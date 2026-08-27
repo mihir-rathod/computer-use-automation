@@ -1,0 +1,16 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.funds_transfer",
+  "outputs": {
+    "status": "not_found",
+    "confirmation_number": null
+  },
+  "business_outcome": "not_found",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2"
+  ],
+  "started_at": "2026-08-27T03:05:06.402734Z",
+  "finished_at": "2026-08-27T03:05:06.580493Z"
+}

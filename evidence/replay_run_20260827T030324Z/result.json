@@ -1,0 +1,22 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.funds_transfer",
+  "outputs": {
+    "status": "validation_error",
+    "confirmation_number": null
+  },
+  "business_outcome": "validation_error",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8"
+  ],
+  "started_at": "2026-08-27T03:03:25.297259Z",
+  "finished_at": "2026-08-27T03:03:25.699080Z"
+}

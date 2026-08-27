@@ -1,0 +1,25 @@
+{
+  "status": "success",
+  "capability_id": "meridian.funds_transfer",
+  "outputs": {
+    "status": "posted",
+    "confirmation_number": "CN480382"
+  },
+  "business_outcome": null,
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9",
+    "s10",
+    "s11"
+  ],
+  "started_at": "2026-08-27T03:00:42.191560Z",
+  "finished_at": "2026-08-27T03:01:24.630211Z"
+}
