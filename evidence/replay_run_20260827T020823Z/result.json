@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "capability_id": "meridian.signon",
+  "outputs": {
+    "status": "authenticated"
+  },
+  "business_outcome": null,
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2",
+    "s3",
+    "s4"
+  ],
+  "started_at": "2026-08-27T02:08:24.029311Z",
+  "finished_at": "2026-08-27T02:08:24.258507Z"
+}

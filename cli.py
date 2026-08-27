@@ -169,7 +169,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
         page.goto(f"{target['base_url']}{target['login_path']}")
 
         surface = WebSurface(page, base_url=target["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
-        run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
+        # Discovering the target's own login capability is the one case where we must NOT log
+        # in first -- that would be circular (you can't sign on before discovering how to sign
+        # on). Every other capability assumes an authenticated session, hence the skip is keyed
+        # off exactly this one id, not a general flag.
+        if args.capability != target["login_capability"]:
+            run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
 
         if not args.no_operator_console:
             session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=spec.capability_id, goal=spec.goal)

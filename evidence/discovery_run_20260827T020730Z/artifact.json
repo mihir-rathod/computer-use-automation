@@ -1,0 +1,209 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "meridian.signon",
+  "version": "1.0.0",
+  "name": "Sign on to MERIDIAN CORE",
+  "description": "Authenticates an operator session against MERIDIAN CORE. Discovered unauthenticated, unlike every other MERIDIAN capability -- see cmd_discover's login-capability skip in cli.py.",
+  "target": {
+    "app_id": "meridian",
+    "surface_type": "web",
+    "base_url": "https://web-sample.interface-hiring.com",
+    "vendor_product": "meridian-core",
+    "tenant_id": null
+  },
+  "preconditions": null,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "username": {
+        "type": "string"
+      },
+      "password": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "username",
+      "password"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "authenticated",
+          "invalid_credentials"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "url_matches",
+    "value": "**/menu",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/signon"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='operator']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ]
+      },
+      "params": {
+        "text": "{{username}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{username}}",
+        "target": {
+          "semantic_description": "textbox",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='operator']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ]
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='password']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ]
+      },
+      "params": {
+        "text": "{{password}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{password}}",
+        "target": {
+          "semantic_description": "textbox",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='password']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ]
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Sign On",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Sign On']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ]
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/menu",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Invalid operator ID or password.",
+          "target": null,
+          "description": null
+        },
+        "outcome": "invalid_credentials",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20260827T020730Z",
+    "created_at": "2026-08-27T02:07:33.964597Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed."
+  },
+  "success_output_defaults": {
+    "status": "authenticated"
+  }
+}

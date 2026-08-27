@@ -1,0 +1,16 @@
+{
+  "status": "business_outcome",
+  "capability_id": "meridian.signon",
+  "outputs": {
+    "status": "invalid_credentials"
+  },
+  "business_outcome": "invalid_credentials",
+  "error": null,
+  "steps_completed": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "started_at": "2026-08-27T02:08:41.244776Z",
+  "finished_at": "2026-08-27T02:08:41.460204Z"
+}

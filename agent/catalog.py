@@ -104,8 +104,43 @@ def _member_balance_lookup_spec(base_url: str) -> CapabilitySpec:
     )
 
 
+def _meridian_signon_spec(base_url: str) -> CapabilitySpec:
+    return CapabilitySpec(
+        capability_id="meridian.signon",
+        version="1.0.0",
+        name="Sign on to MERIDIAN CORE",
+        description="Authenticates an operator session against MERIDIAN CORE. Discovered "
+                     "unauthenticated, unlike every other MERIDIAN capability -- see "
+                     "cmd_discover's login-capability skip in cli.py.",
+        goal=(
+            "Sign on to the system. The form has two unlabeled text fields with no visible "
+            "label association in the element list: the FIRST one (a plain text field) is the "
+            "Operator ID -- type the given username into it. The SECOND one (a password-type "
+            "field) is the Password -- type the given password into it. Leave the Branch "
+            "dropdown at its default selected value; do not change it. Then click the button "
+            "labeled 'Sign On'. The goal is complete once the MAIN MENU page is visible."
+        ),
+        start_path="/signon",
+        target=CapabilityTarget(app_id="meridian", surface_type=SurfaceType.WEB, base_url=base_url, vendor_product="meridian-core"),
+        input_schema=JSONSchemaObject(properties={"username": {"type": "string"}, "password": {"type": "string"}}, required=["username", "password"]),
+        output_schema=JSONSchemaObject(properties={
+            "status": {"type": "string", "enum": ["authenticated", "invalid_credentials"]},
+        }, required=["status"]),
+        success_checkpoint=Signal(type=SignalType.URL_MATCHES, value="**/menu"),
+        error_handling=ErrorHandling(
+            business_outcomes=[
+                BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="Invalid operator ID or password."), outcome="invalid_credentials"),
+            ],
+        ),
+        safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=False),
+        preconditions=None,
+        success_output_defaults={"status": "authenticated"},
+    )
+
+
 _CATALOG = {
     "mockbank.member_balance_lookup": _member_balance_lookup_spec,
+    "meridian.signon": _meridian_signon_spec,
 }
 
 
