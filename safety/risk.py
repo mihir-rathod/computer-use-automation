@@ -28,7 +28,19 @@ _ALWAYS_SAFE_ACTIONS = {ActionType.EXTRACT, ActionType.NAVIGATE, ActionType.WAIT
 # accessible name, matching the convention WebSurface.compute_target() already uses for
 # LLM-discovered artifacts, precisely so semantic_description stays a reliable classification
 # signal rather than free-text prose.
-_RISK_KEYWORDS = ("confirm", "delete", "remove", "transfer", "withdraw", "close account")
+#
+# Two tiers, found necessary by pointing this at MERIDIAN CORE: a *commit* keyword
+# ("confirm"/"post"/"delete"/"remove") legitimately means "this action commits something"
+# wherever it appears -- element name or current page path. A *domain-noun* keyword
+# ("transfer"/"withdraw"/"hold"/"close account") only describes what a specific ELEMENT does,
+# never "we are somewhere in this flow": MERIDIAN's own route naming bakes the domain word into
+# every step of a flow (/members/{id}/transfer, .../transfer/review), so matching it against
+# current_path would misclassify the safe "Continue" click that merely reaches the *review*
+# page (nothing posted yet, still cancelable) as irreversible -- before the operator ever sees
+# the review screen. MockBank never exercised this because none of its route segments collide
+# with a domain-noun keyword.
+_COMMIT_KEYWORDS = ("confirm", "post", "delete", "remove")
+_DOMAIN_KEYWORDS = ("transfer", "withdraw", "close account", "hold")
 
 
 class RiskClassifier:
@@ -40,7 +52,10 @@ class RiskClassifier:
     ) -> StepRiskLevel:
         if action_type in _ALWAYS_SAFE_ACTIONS:
             return StepRiskLevel.SAFE
-        haystack = f"{semantic_description or ''} {current_path or ''}".lower()
-        if any(keyword in haystack for keyword in _RISK_KEYWORDS):
+        description = (semantic_description or "").lower()
+        haystack = f"{description} {current_path or ''}".lower()
+        if any(keyword in haystack for keyword in _COMMIT_KEYWORDS):
+            return StepRiskLevel.IRREVERSIBLE
+        if any(keyword in description for keyword in _DOMAIN_KEYWORDS):
             return StepRiskLevel.IRREVERSIBLE
         return StepRiskLevel.SAFE
