@@ -60,6 +60,10 @@ SYSTEM_INSTRUCTION = (
 # the model: each message is evaluated fresh, on purpose (see module docstring).
 _HISTORY: list[dict[str, str]] = []
 
+# Sticks across messages (until the process restarts) so "watch mode" doesn't reset after every
+# send -- demoing several requests in a row shouldn't mean re-ticking the checkbox each time.
+_SETTINGS = {"headed": False, "slow_mo": 0}
+
 
 def _function_name(capability_id: str) -> str:
     """Gemini function names can't contain '.', which every capability_id has."""
@@ -95,7 +99,10 @@ def _build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
 
 
 def _invoke(capability_id: str, args: dict[str, Any], target: str) -> dict[str, Any]:
-    body: dict[str, Any] = {"params": args, "target": target}
+    body: dict[str, Any] = {
+        "params": args, "target": target,
+        "headed": _SETTINGS["headed"], "slow_mo": _SETTINGS["slow_mo"],
+    }
     # Test-only escape hatch: points a run at an in-process test target instance instead of the
     # profile's real base_url, the same override InvokeRequest.base_url already exists for.
     override = os.environ.get("CAPABILITY_TARGET_BASE_URL_OVERRIDE")
@@ -129,14 +136,20 @@ def _render_result(capability_id: str, result: dict[str, Any]) -> str:
 
 @router.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request):
-    return templates.TemplateResponse(request, "chat.html", {"history": _HISTORY})
+    return templates.TemplateResponse(request, "chat.html", {"history": _HISTORY, "settings": _SETTINGS})
 
 
 @router.post("/chat")
-def chat_send(message: str = Form(...)):
+def chat_send(message: str = Form(...), headed: bool = Form(False), slow_mo: int = Form(0)):
     """Plain `def`, not `async def` -- both the Gemini call and the invoke call below are
     blocking; FastAPI runs a sync handler in a thread pool automatically, so this doesn't stall
-    other requests, same reasoning as api/app.py's invoke handler."""
+    other requests, same reasoning as api/app.py's invoke handler.
+
+    `headed`/`slow_mo` come straight from the page's own toggle + speed select -- a fast headless
+    replay is correct for production but too fast to actually watch, even with a visible browser
+    window (found via a real demo-rehearsal complaint, not guessed at)."""
+    _SETTINGS["headed"] = headed
+    _SETTINGS["slow_mo"] = slow_mo
     _HISTORY.append({"role": "user", "text": message})
 
     client = GeminiClient()

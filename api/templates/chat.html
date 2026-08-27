@@ -17,9 +17,16 @@
   .msg.user { align-self: flex-end; background: #2a5adf; color: white; }
   .msg.assistant { align-self: flex-start; background: #f0f0f0; color: #1a1a1a; border: 1px solid #e2e2e2; }
   .empty { color: #888; font-size: 13px; font-style: italic; }
-  form.send { display: flex; gap: 8px; }
-  form.send input[type=text] { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  form.send button { padding: 10px 18px; border: none; border-radius: 6px; background: #2a5adf; color: white; font-weight: 600; font-size: 14px; cursor: pointer; }
+  .watch-bar {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 12px; padding: 8px 12px;
+    background: #f7f7f7; border: 1px solid #e2e2e2; border-radius: 6px; font-size: 13px; color: #444;
+  }
+  .watch-bar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .watch-bar select { padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  .watch-bar .hint { color: #888; font-size: 12px; margin-left: auto; }
+  .send-row { display: flex; gap: 8px; }
+  .send-row input[type=text] { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  .send-row button { padding: 10px 18px; border: none; border-radius: 6px; background: #2a5adf; color: white; font-weight: 600; font-size: 14px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -34,9 +41,22 @@
   {% endfor %}
 </div>
 
-<form class="send" method="post" action="/chat">
-  <input type="text" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
-  <button type="submit">Send</button>
+<form method="post" action="/chat">
+  <div class="watch-bar">
+    <label><input type="checkbox" name="headed" value="true" {% if settings.headed %}checked{% endif %}> Show browser</label>
+    <label>Speed
+      <select name="slow_mo">
+        <option value="0" {% if settings.slow_mo == 0 %}selected{% endif %}>Full speed</option>
+        <option value="400" {% if settings.slow_mo == 400 %}selected{% endif %}>Slow</option>
+        <option value="800" {% if settings.slow_mo == 800 %}selected{% endif %}>Slower</option>
+      </select>
+    </label>
+    <span class="hint">Show browser pops a real, separate window driving the actual site.</span>
+  </div>
+  <div class="send-row">
+    <input type="text" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
+    <button type="submit">Send</button>
+  </div>
 </form>
 </body>
 </html>

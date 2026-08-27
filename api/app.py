@@ -43,6 +43,7 @@ class InvokeRequest(BaseModel):
     username: str | None = None
     password: str | None = None
     headed: bool = False
+    slow_mo: int = 0
 
 
 @app.get("/capabilities")
@@ -80,7 +81,7 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
         result, evidence_dir = run_replay(
             capability_id, body.params,
             target=body.target, base_url=body.base_url, username=body.username, password=body.password,
-            headed=body.headed,
+            headed=body.headed, slow_mo=body.slow_mo,
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"unknown capability '{capability_id}'")

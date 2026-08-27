@@ -90,7 +90,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     session = None
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.headed)
+        browser = p.chromium.launch(headless=not args.headed, slow_mo=args.slow_mo)
         page = browser.new_page()
         page.goto(f"{target['base_url']}{target['login_path']}")
 
@@ -151,7 +151,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     result, evidence_dir = runtime.run_replay(
         args.capability, params,
         target=args.target, base_url=args.base_url, username=args.username, password=args.password, allowlist=args.allowlist,
-        headed=args.headed, evidence_dir=evidence_dir,
+        headed=args.headed, slow_mo=args.slow_mo, evidence_dir=evidence_dir,
         operator_port=args.operator_port, enable_operator_console=not args.no_operator_console,
     )
 
@@ -179,6 +179,7 @@ def main() -> int:
     discover_p.add_argument("--password", default=None, help="override the --target profile's password")
     discover_p.add_argument("--allowlist", default=None, help="override the --target profile's allowlist JSON path")
     discover_p.add_argument("--headed", action="store_true", help="show the browser window instead of running headless")
+    discover_p.add_argument("--slow-mo", type=int, default=0, help="milliseconds Playwright pauses before each action -- for watching a --headed run, e.g. 500-800")
     discover_p.add_argument("--evidence-dir", default=None)
     discover_p.add_argument("--max-steps", type=int, default=25)
     discover_p.add_argument("--timeout", type=int, default=300)
@@ -197,6 +198,7 @@ def main() -> int:
     replay_p.add_argument("--password", default=None, help="override the --target profile's password")
     replay_p.add_argument("--allowlist", default=None, help="override the --target profile's allowlist JSON path")
     replay_p.add_argument("--headed", action="store_true")
+    replay_p.add_argument("--slow-mo", type=int, default=0, help="milliseconds Playwright pauses before each action -- for watching a --headed run, e.g. 500-800")
     replay_p.add_argument("--evidence-dir", default=None)
     replay_p.set_defaults(func=cmd_replay)
 

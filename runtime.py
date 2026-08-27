@@ -121,13 +121,21 @@ def run_replay(
     password: str | None = None,
     allowlist: str | None = None,
     headed: bool = False,
+    slow_mo: int = 0,
     evidence_dir: Path | None = None,
     operator_port: int = 8010,
     enable_operator_console: bool = True,
 ) -> tuple[ReplayResult, Path]:
     """Launch a browser, log in, deterministically replay one capability, write evidence.
     The single function every front door (CLI `replay`, the capability API, the chatbot) calls
-    -- see module docstring for why that matters."""
+    -- see module docstring for why that matters.
+
+    `slow_mo` (milliseconds of pause Playwright inserts before each action) is separate from
+    `headed` on purpose, matching Playwright's own convention: a fast, real replay against
+    MERIDIAN completes in a couple of seconds even headed, which is correct for production but
+    too fast for a human to actually watch happen. For a live demo, pass both --headed and a
+    --slow-mo (e.g. 500-800ms) together.
+    """
     profile = resolve_target(target, base_url, username, password, allowlist)
     artifact = load_artifact_by_id(capability_id)
     evidence_dir = evidence_dir or (EVIDENCE_ROOT / run_id("replay_run"))
@@ -139,7 +147,7 @@ def run_replay(
     session = None
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed)
+        browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo)
         page = browser.new_page()
         page.goto(f"{profile['base_url']}{profile['login_path']}")
 
