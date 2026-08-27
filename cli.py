@@ -83,6 +83,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
     params = parse_params(args.param)
     evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / runtime.run_id("discovery_run")
     logger = EvidenceLogger(evidence_dir)
+    # Logged as soon as the evidence dir exists, before anything can go wrong -- the dashboard
+    # (Phase 5) needs to identify what a run *is* (capability, goal, target) even for a run that
+    # crashes or hangs before ever reaching a terminal "discovery_result" event.
+    logger.log("system", "run_start", kind="discovery", capability_id=spec.capability_id, goal=spec.goal, target=args.target)
     safety_policy = runtime.build_safety_policy(target["base_url"], target["allowlist"])
 
     if not args.no_operator_console:

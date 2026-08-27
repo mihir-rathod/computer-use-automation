@@ -140,6 +140,9 @@ def run_replay(
     artifact = load_artifact_by_id(capability_id)
     evidence_dir = evidence_dir or (EVIDENCE_ROOT / run_id("replay_run"))
     logger = EvidenceLogger(evidence_dir)
+    # Same reasoning as cmd_discover's own run_start log (cli.py): the dashboard needs to know
+    # what a run is even if it crashes or hangs before ever reaching the "replay"/"result" event.
+    logger.log("system", "run_start", kind="replay", capability_id=capability_id, target=target, params=params)
     safety_policy = build_safety_policy(profile["base_url"], profile["allowlist"])
 
     if enable_operator_console:

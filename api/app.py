@@ -32,9 +32,11 @@ from runtime import TARGET_PROFILES, ensure_operator_console, run_replay
 load_dotenv()
 
 from api.chatbot import router as chatbot_router
+from api.dashboard import router as dashboard_router
 
 app = FastAPI(title="Capability API")
 app.include_router(chatbot_router)
+app.include_router(dashboard_router)
 
 # Started here, not left to the first invoke's own lazy start (runtime.run_replay ->
 # ensure_operator_console): the chatbot page links to this console as soon as it loads (see
