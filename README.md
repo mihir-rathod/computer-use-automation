@@ -133,6 +133,13 @@ uv run uvicorn api.app:app --port 8020
 The chat page exposes `headed`/`slow_mo` as a plain "Show browser" checkbox and speed selector,
 so you don't need to construct this JSON by hand to watch a run live.
 
+**Recommended way to watch a run live: the chatbot (or a raw `/invoke` call), not the CLI.**
+`cli.py replay --headed` / `discover --headed` do show a real, live browser window while the
+command is running -- but that window closes the moment the command finishes, because the CLI is
+a one-shot script and Playwright's browser is tied to its parent process's lifetime. Only a
+headed run driven through the API server (which stays running) actually keeps the window open
+afterward for review, as described above.
+
 ### One execution path
 
 `cli.py replay`, a raw `POST /invoke`, and the chatbot all call the exact same
@@ -153,6 +160,8 @@ uv run python cli.py discover --capability meridian.update_member --target merid
   --param member_id=100987 --param email=member100987@example.com \
   --param phone=555-0187 --param address="123 Elm St, Springfield" \
   --headed --slow-mo 500
+# Note: this window closes the instant the command finishes (see "Calling /invoke directly"
+# above) -- it's for watching the run live, not for reviewing the final page afterward.
 
 # Replay an already-recorded MERIDIAN capability directly (no LLM call needed):
 uv run python cli.py replay --capability meridian.balance_inquiry --target meridian --param member_id=100987
