@@ -86,12 +86,29 @@ class WebSurface(Surface):
             value=f"{element.role}[name='{element.name}']" if element.name else element.role,
             note="Primary: accessible role + name, computed at discovery time.",
         )]
-        css_id = self.page.locator(f"aria-ref={ref}").get_attribute("id")
+        pw_locator = self.page.locator(f"aria-ref={ref}")
+        css_id = pw_locator.get_attribute("id")
         if css_id:
             locators.append(SchemaLocator(
                 strategy=LocatorStrategy.CSS, value=f"#{css_id}",
                 note="Fallback: element id present at discovery time, not guaranteed stable across tenants.",
             ))
+        elif not element.name:
+            # No accessible name AND no id -- found against MERIDIAN CORE, whose legacy
+            # table-layout forms have no <label>/aria-label at all: the primary role locator
+            # above degrades to a bare role (e.g. "textbox") with nothing to disambiguate it,
+            # which matches every same-role field on the page and is treated as no match at all
+            # by resolve_target's "ambiguous match = no match" rule -- replay failed here with
+            # "could not resolve element" before this fallback existed. The HTML `name`
+            # attribute is a stable identifier even without a label: it's literally what the
+            # server keys the submitted value off.
+            html_name = pw_locator.get_attribute("name")
+            if html_name:
+                locators.append(SchemaLocator(
+                    strategy=LocatorStrategy.CSS, value=f"[name='{html_name}']",
+                    note="Fallback: no accessible name or id at discovery time -- the HTML name "
+                         "attribute is the only stable identifier this element has.",
+                ))
         return Target(semantic_description=element.name or element.role, locators=locators)
 
     # ---- check_signal -------------------------------------------------------------------
