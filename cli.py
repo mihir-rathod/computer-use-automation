@@ -4,10 +4,15 @@
     uv run python cli.py discover --capability mockbank.member_balance_lookup --param member_id=10001
     uv run python cli.py replay    --capability mockbank.member_balance_lookup --param member_id=10002
 
-Both commands log in first (via the mockbank.login artifact, replayed like any other
+Both commands log in first (via the target's own login capability, replayed like any other
 capability -- login is a first-class reusable capability, not special-cased CLI logic) and
 write structured evidence -- a JSONL log of every perceive/act, screenshots, and the final
 artifact or result -- to /evidence/<run>/ by default.
+
+`replay` is a thin wrapper over runtime.run_replay() -- the same function the capability API
+(api/app.py) calls -- so the CLI and the API can never diverge on how a capability actually
+runs. `discover` stays CLI-only: the brief's capability API is specifically about invoking
+already-recorded capabilities (3.2), not about running discovery.
 """
 from __future__ import annotations
 
@@ -15,85 +20,26 @@ import argparse
 import json
 import os
 import sys
-import threading
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import uvicorn
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+import runtime
 from agent.catalog import get_spec
 from agent.gemini_client import GeminiClient
 from agent.loop import DiscoveryLoop
 from agent.recorder import build_artifact
 from artifacts_lib.storage import load_artifact_by_id, save_artifact
-from escalation.operator_console import app as operator_app
 from escalation.registry import register_session, unregister_session
 from escalation.session_manager import SessionManager
 from evidence_lib.logger import EvidenceLogger
-from replay.engine import ReplayEngine
 from replay.result import ReplayStatus
-from safety.allowlist import DEFAULT_ALLOWLIST_PATH, AllowlistConfig, AllowlistPolicy
-from safety.policy import SafetyPolicy
 from surface.web import WebSurface
 
-REPO_ROOT = Path(__file__).resolve().parent
-EVIDENCE_ROOT = REPO_ROOT / "evidence"
-_operator_console_started = False
-
-# Adapting to a new target is choosing a profile here, not writing code -- each entry pairs a
-# base URL with the allowlist config and login capability that go with it. `--target` selects
-# one; any of --base-url/--username/--password/--allowlist still overrides its piece explicitly.
-TARGET_PROFILES: dict[str, dict[str, Any]] = {
-    "mockbank": {
-        "base_url": os.environ.get("MOCKBANK_BASE_URL", "http://localhost:8000"),
-        "username": "operator",
-        "password": "bankdemo123",
-        "allowlist": DEFAULT_ALLOWLIST_PATH,
-        "login_capability": "mockbank.login",
-        "login_path": "/login",
-    },
-    "meridian": {
-        "base_url": "https://web-sample.interface-hiring.com",
-        "username": "teller1",
-        "password": "password",
-        "allowlist": REPO_ROOT / "safety" / "allowlist_meridian.json",
-        "login_capability": "meridian.signon",
-        "login_path": "/signon",
-    },
-}
-
-
-def resolve_target(args: argparse.Namespace) -> dict[str, Any]:
-    """Merges the selected --target profile with any explicit CLI overrides -- adapting to a
-    new target is picking a profile, not writing code; an override still wins per-field when
-    given (e.g. --base-url against a locally proxied copy of the same target)."""
-    profile = dict(TARGET_PROFILES[args.target])
-    if args.base_url is not None:
-        profile["base_url"] = args.base_url
-    if args.username is not None:
-        profile["username"] = args.username
-    if args.password is not None:
-        profile["password"] = args.password
-    if args.allowlist is not None:
-        profile["allowlist"] = Path(args.allowlist)
-    return profile
-
-
-def ensure_operator_console(port: int) -> None:
-    """Starts the operator console once per process, in a background thread. Only the
-    automation thread (the one running discover/replay, below) ever touches the live
-    Playwright page -- this thread only serves HTML and enqueues human-submitted intents via
-    SessionManager.request_action (see escalation/session_manager.py's module docstring)."""
-    global _operator_console_started
-    if _operator_console_started:
-        return
-    config = uvicorn.Config(operator_app, host="127.0.0.1", port=port, log_level="warning")
-    server = uvicorn.Server(config)
-    threading.Thread(target=server.run, daemon=True).start()
-    _operator_console_started = True
+EVIDENCE_ROOT = runtime.EVIDENCE_ROOT
+TARGET_PROFILES = runtime.TARGET_PROFILES
 
 
 def parse_params(pairs: list[str], input_schema: Any = None) -> dict[str, Any]:
@@ -127,40 +73,20 @@ def _coerce_param(value: str, declared_type: Any) -> Any:
     return value
 
 
-def build_safety_policy(base_url: str, allowlist_path: Path = DEFAULT_ALLOWLIST_PATH) -> SafetyPolicy:
-    config = AllowlistConfig.from_json(allowlist_path)
-    # allowed_route_patterns/action_types come from the checked-in policy; allowed_base_urls is
-    # overridden to whatever --base-url actually is, so the policy always matches where this
-    # run is really pointed rather than silently drifting from the JSON file's documented default.
-    config = config.model_copy(update={"allowed_base_urls": [base_url]})
-    return SafetyPolicy(AllowlistPolicy(config))
-
-
-def run_login(surface: WebSurface, username: str, password: str, login_capability: str = "mockbank.login") -> None:
-    login_artifact = load_artifact_by_id(login_capability)
-    result = ReplayEngine(surface).run(login_artifact, {"username": username, "password": password})
-    if result.status != ReplayStatus.SUCCESS:
-        raise SystemExit(f"login failed: status={result.status.value} error={result.error}")
-
-
-def _run_id(prefix: str) -> str:
-    return f"{prefix}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-
-
 def cmd_discover(args: argparse.Namespace) -> int:
     load_dotenv()
     if not os.environ.get("GEMINI_API_KEY"):
         raise SystemExit("GEMINI_API_KEY is not set -- see README.md Setup (needed for `discover`, not `replay`).")
 
-    target = resolve_target(args)
+    target = runtime.resolve_target(args.target, args.base_url, args.username, args.password, args.allowlist)
     spec = get_spec(args.capability, target["base_url"])
     params = parse_params(args.param)
-    evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / _run_id("discovery_run")
+    evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / runtime.run_id("discovery_run")
     logger = EvidenceLogger(evidence_dir)
-    safety_policy = build_safety_policy(target["base_url"], target["allowlist"])
+    safety_policy = runtime.build_safety_policy(target["base_url"], target["allowlist"])
 
     if not args.no_operator_console:
-        ensure_operator_console(args.operator_port)
+        runtime.ensure_operator_console(args.operator_port)
     session = None
 
     with sync_playwright() as p:
@@ -174,7 +100,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         # on). Every other capability assumes an authenticated session, hence the skip is keyed
         # off exactly this one id, not a general flag.
         if args.capability != target["login_capability"]:
-            run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
+            runtime.run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
 
         if not args.no_operator_console:
             session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=spec.capability_id, goal=spec.goal)
@@ -212,39 +138,22 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
 def cmd_replay(args: argparse.Namespace) -> int:
     load_dotenv()
-    target = resolve_target(args)
     artifact = load_artifact_by_id(args.capability)
     params = parse_params(args.param, input_schema=artifact.input_schema)
-    evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / _run_id("replay_run")
-    logger = EvidenceLogger(evidence_dir)
-    safety_policy = build_safety_policy(target["base_url"], target["allowlist"])
+    # Computed here, not left to run_replay's own default, so the session id (== evidence_dir
+    # name) is known up front -- the operator console URL can then be printed *before* the run
+    # starts, matching discover's behavior, rather than only after it finishes.
+    evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / runtime.run_id("replay_run")
 
     if not args.no_operator_console:
-        ensure_operator_console(args.operator_port)
-    session = None
+        print(f"operator console (visit if this run pauses): http://127.0.0.1:{args.operator_port}/operator/{evidence_dir.name}")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not args.headed)
-        page = browser.new_page()
-        page.goto(f"{target['base_url']}{target['login_path']}")
-
-        surface = WebSurface(page, base_url=target["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
-        run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
-
-        if not args.no_operator_console:
-            session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=args.capability, goal=None)
-            register_session(session)
-            print(f"operator console (visit if this run pauses): http://127.0.0.1:{args.operator_port}/operator/{session.session_id}")
-
-        engine = ReplayEngine(
-            surface, evidence_logger=logger,
-            reauth_credentials={"username": target["username"], "password": target["password"]},
-            session_manager=session,
-        )
-        result = engine.run(artifact, params)
-        if session is not None:
-            unregister_session(session.session_id)
-        browser.close()
+    result, evidence_dir = runtime.run_replay(
+        args.capability, params,
+        target=args.target, base_url=args.base_url, username=args.username, password=args.password, allowlist=args.allowlist,
+        headed=args.headed, evidence_dir=evidence_dir,
+        operator_port=args.operator_port, enable_operator_console=not args.no_operator_console,
+    )
 
     print(f"status: {result.status.value}")
     if result.outputs is not None:
@@ -253,8 +162,6 @@ def cmd_replay(args: argparse.Namespace) -> int:
         print(f"business_outcome: {result.business_outcome}")
     if result.error:
         print(f"error: {result.error.message}" + (f" (step {result.error.step_id})" if result.error.step_id else ""))
-
-    (evidence_dir / "result.json").write_text(result.model_dump_json(indent=2))
     print(f"evidence: {evidence_dir}")
     return 1 if result.status == ReplayStatus.HARD_FAILURE else 0
 
