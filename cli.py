@@ -93,7 +93,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
         runtime.ensure_operator_console(args.operator_port)
     session = None
 
-    with sync_playwright() as p:
+    # Not a `with sync_playwright() as p:` block on purpose -- same reasoning as
+    # runtime.run_replay(): its __exit__ stops the driver unconditionally, which kills the
+    # browser even if .close() is skipped (verified empirically). When --headed, a human is
+    # watching specifically to review the final state, so the driver/browser are deliberately
+    # left running for them to close themselves rather than vanishing the instant it's done.
+    p = sync_playwright().start()
+    browser = None
+    try:
         browser = p.chromium.launch(headless=not args.headed, slow_mo=args.slow_mo)
         page = browser.new_page()
         page.goto(f"{target['base_url']}{target['login_path']}")
@@ -115,7 +122,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
         result = loop.run(goal=spec.goal, parameters=params, start_path=spec.start_path)
         if session is not None:
             unregister_session(session.session_id)
-        browser.close()
+    finally:
+        if not args.headed:
+            if browser is not None:
+                browser.close()
+            p.stop()
 
     print(f"discovery stop_reason={result.stop_reason} steps={len(result.transcript)}" + (" (escalated to operator)" if result.escalated else ""))
     if result.reasoning:

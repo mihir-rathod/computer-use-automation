@@ -147,29 +147,65 @@ def run_replay(
 
     if enable_operator_console:
         ensure_operator_console(operator_port)
-    session = None
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo)
-        page = browser.new_page()
-        page.goto(f"{profile['base_url']}{profile['login_path']}")
+    # Run on a dedicated, never-reused thread -- not `with sync_playwright() as p:` (its own
+    # __exit__ stops the driver unconditionally, killing the browser even if .close() is
+    # skipped -- verified empirically) and not directly on the caller's thread either. The
+    # capability API serves requests from a shared thread pool (FastAPI's run_in_threadpool);
+    # skipping p.stop() there for a headed run leaves that *pooled* thread's Playwright-internal
+    # event-loop state dangling, which broke the *next unrelated request* that happened to reuse
+    # the same thread ("Playwright Sync API inside the asyncio loop" -- reproduced live, not
+    # theoretical). Isolating each run to its own throwaway thread means a leaked headed session
+    # only ever poisons a thread nobody else will touch again.
+    #
+    # When headed, a human is watching specifically to review the final state (the whole reason
+    # --slow-mo exists: a normal replay is too fast to watch at all) -- closing the instant the
+    # run finishes would undercut that, so this thread deliberately never calls browser.close()/
+    # p.stop() and simply keeps running (Playwright's own background dispatcher thread, which it
+    # spawns internally, keeps the driver connection alive independently of this function
+    # returning). Only the non-headed path -- the common case, and the only one with no one
+    # watching -- tears down automatically.
+    result_box: dict[str, ReplayResult | BaseException] = {}
 
-        surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
-        run_login(surface, profile["username"], profile["password"], login_capability=profile["login_capability"])
+    def _worker() -> None:
+        session = None
+        p = sync_playwright().start()
+        browser = None
+        try:
+            browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo)
+            page = browser.new_page()
+            page.goto(f"{profile['base_url']}{profile['login_path']}")
 
-        if enable_operator_console:
-            session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None)
-            register_session(session)
+            surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
+            run_login(surface, profile["username"], profile["password"], login_capability=profile["login_capability"])
 
-        engine = ReplayEngine(
-            surface, evidence_logger=logger,
-            reauth_credentials={"username": profile["username"], "password": profile["password"]},
-            session_manager=session,
-        )
-        result = engine.run(artifact, params)
-        if session is not None:
-            unregister_session(session.session_id)
-        browser.close()
+            if enable_operator_console:
+                session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None)
+                register_session(session)
+
+            engine = ReplayEngine(
+                surface, evidence_logger=logger,
+                reauth_credentials={"username": profile["username"], "password": profile["password"]},
+                session_manager=session,
+            )
+            result_box["result"] = engine.run(artifact, params)
+        except BaseException as exc:  # noqa: BLE001 -- re-raised on the calling thread below
+            result_box["result"] = exc
+        finally:
+            if session is not None:
+                unregister_session(session.session_id)
+            if not headed:
+                if browser is not None:
+                    browser.close()
+                p.stop()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join()
+    outcome = result_box["result"]
+    if isinstance(outcome, BaseException):
+        raise outcome
+    result = outcome
 
     (evidence_dir / "result.json").write_text(result.model_dump_json(indent=2))
     return result, evidence_dir
