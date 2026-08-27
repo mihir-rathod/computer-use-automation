@@ -43,6 +43,44 @@ REPO_ROOT = Path(__file__).resolve().parent
 EVIDENCE_ROOT = REPO_ROOT / "evidence"
 _operator_console_started = False
 
+# Adapting to a new target is choosing a profile here, not writing code -- each entry pairs a
+# base URL with the allowlist config and login capability that go with it. `--target` selects
+# one; any of --base-url/--username/--password/--allowlist still overrides its piece explicitly.
+TARGET_PROFILES: dict[str, dict[str, Any]] = {
+    "mockbank": {
+        "base_url": os.environ.get("MOCKBANK_BASE_URL", "http://localhost:8000"),
+        "username": "operator",
+        "password": "bankdemo123",
+        "allowlist": DEFAULT_ALLOWLIST_PATH,
+        "login_capability": "mockbank.login",
+        "login_path": "/login",
+    },
+    "meridian": {
+        "base_url": "https://web-sample.interface-hiring.com",
+        "username": "teller1",
+        "password": "password",
+        "allowlist": REPO_ROOT / "safety" / "allowlist_meridian.json",
+        "login_capability": "meridian.signon",
+        "login_path": "/signon",
+    },
+}
+
+
+def resolve_target(args: argparse.Namespace) -> dict[str, Any]:
+    """Merges the selected --target profile with any explicit CLI overrides -- adapting to a
+    new target is picking a profile, not writing code; an override still wins per-field when
+    given (e.g. --base-url against a locally proxied copy of the same target)."""
+    profile = dict(TARGET_PROFILES[args.target])
+    if args.base_url is not None:
+        profile["base_url"] = args.base_url
+    if args.username is not None:
+        profile["username"] = args.username
+    if args.password is not None:
+        profile["password"] = args.password
+    if args.allowlist is not None:
+        profile["allowlist"] = Path(args.allowlist)
+    return profile
+
 
 def ensure_operator_console(port: int) -> None:
     """Starts the operator console once per process, in a background thread. Only the
@@ -89,8 +127,8 @@ def _coerce_param(value: str, declared_type: Any) -> Any:
     return value
 
 
-def build_safety_policy(base_url: str) -> SafetyPolicy:
-    config = AllowlistConfig.from_json(DEFAULT_ALLOWLIST_PATH)
+def build_safety_policy(base_url: str, allowlist_path: Path = DEFAULT_ALLOWLIST_PATH) -> SafetyPolicy:
+    config = AllowlistConfig.from_json(allowlist_path)
     # allowed_route_patterns/action_types come from the checked-in policy; allowed_base_urls is
     # overridden to whatever --base-url actually is, so the policy always matches where this
     # run is really pointed rather than silently drifting from the JSON file's documented default.
@@ -98,8 +136,8 @@ def build_safety_policy(base_url: str) -> SafetyPolicy:
     return SafetyPolicy(AllowlistPolicy(config))
 
 
-def run_login(surface: WebSurface, username: str, password: str) -> None:
-    login_artifact = load_artifact_by_id("mockbank.login")
+def run_login(surface: WebSurface, username: str, password: str, login_capability: str = "mockbank.login") -> None:
+    login_artifact = load_artifact_by_id(login_capability)
     result = ReplayEngine(surface).run(login_artifact, {"username": username, "password": password})
     if result.status != ReplayStatus.SUCCESS:
         raise SystemExit(f"login failed: status={result.status.value} error={result.error}")
@@ -114,11 +152,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
     if not os.environ.get("GEMINI_API_KEY"):
         raise SystemExit("GEMINI_API_KEY is not set -- see README.md Setup (needed for `discover`, not `replay`).")
 
-    spec = get_spec(args.capability, args.base_url)
+    target = resolve_target(args)
+    spec = get_spec(args.capability, target["base_url"])
     params = parse_params(args.param)
     evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / _run_id("discovery_run")
     logger = EvidenceLogger(evidence_dir)
-    safety_policy = build_safety_policy(args.base_url)
+    safety_policy = build_safety_policy(target["base_url"], target["allowlist"])
 
     if not args.no_operator_console:
         ensure_operator_console(args.operator_port)
@@ -127,10 +166,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not args.headed)
         page = browser.new_page()
-        page.goto(f"{args.base_url}/login")
+        page.goto(f"{target['base_url']}{target['login_path']}")
 
-        surface = WebSurface(page, base_url=args.base_url, screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
-        run_login(surface, args.username, args.password)
+        surface = WebSurface(page, base_url=target["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
+        run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
 
         if not args.no_operator_console:
             session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=spec.capability_id, goal=spec.goal)
@@ -168,11 +207,12 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
 def cmd_replay(args: argparse.Namespace) -> int:
     load_dotenv()
+    target = resolve_target(args)
     artifact = load_artifact_by_id(args.capability)
     params = parse_params(args.param, input_schema=artifact.input_schema)
     evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / _run_id("replay_run")
     logger = EvidenceLogger(evidence_dir)
-    safety_policy = build_safety_policy(args.base_url)
+    safety_policy = build_safety_policy(target["base_url"], target["allowlist"])
 
     if not args.no_operator_console:
         ensure_operator_console(args.operator_port)
@@ -181,10 +221,10 @@ def cmd_replay(args: argparse.Namespace) -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not args.headed)
         page = browser.new_page()
-        page.goto(f"{args.base_url}/login")
+        page.goto(f"{target['base_url']}{target['login_path']}")
 
-        surface = WebSurface(page, base_url=args.base_url, screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
-        run_login(surface, args.username, args.password)
+        surface = WebSurface(page, base_url=target["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
+        run_login(surface, target["username"], target["password"], login_capability=target["login_capability"])
 
         if not args.no_operator_console:
             session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=args.capability, goal=None)
@@ -193,7 +233,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
         engine = ReplayEngine(
             surface, evidence_logger=logger,
-            reauth_credentials={"username": args.username, "password": args.password},
+            reauth_credentials={"username": target["username"], "password": target["password"]},
             session_manager=session,
         )
         result = engine.run(artifact, params)
@@ -215,16 +255,17 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    default_base_url = os.environ.get("MOCKBANK_BASE_URL", "http://localhost:8000")
     parser = argparse.ArgumentParser(prog="cli.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
     discover_p = sub.add_parser("discover", help="Run LLM-driven discovery and save the resulting artifact")
     discover_p.add_argument("--capability", required=True, help="capability_id from agent/catalog.py, e.g. mockbank.member_balance_lookup")
     discover_p.add_argument("--param", action="append", default=[], help="key=value, repeatable")
-    discover_p.add_argument("--base-url", default=default_base_url)
-    discover_p.add_argument("--username", default="operator")
-    discover_p.add_argument("--password", default="bankdemo123")
+    discover_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="mockbank", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
+    discover_p.add_argument("--base-url", default=None, help="override the --target profile's base_url")
+    discover_p.add_argument("--username", default=None, help="override the --target profile's username")
+    discover_p.add_argument("--password", default=None, help="override the --target profile's password")
+    discover_p.add_argument("--allowlist", default=None, help="override the --target profile's allowlist JSON path")
     discover_p.add_argument("--headed", action="store_true", help="show the browser window instead of running headless")
     discover_p.add_argument("--evidence-dir", default=None)
     discover_p.add_argument("--max-steps", type=int, default=25)
@@ -238,9 +279,11 @@ def main() -> int:
     replay_p.add_argument("--param", action="append", default=[], help="key=value, repeatable")
     replay_p.add_argument("--operator-port", type=int, default=8010)
     replay_p.add_argument("--no-operator-console", action="store_true", help="disable escalation -- a hard failure just fails instead of pausing for a human")
-    replay_p.add_argument("--base-url", default=default_base_url)
-    replay_p.add_argument("--username", default="operator")
-    replay_p.add_argument("--password", default="bankdemo123")
+    replay_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="mockbank", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
+    replay_p.add_argument("--base-url", default=None, help="override the --target profile's base_url")
+    replay_p.add_argument("--username", default=None, help="override the --target profile's username")
+    replay_p.add_argument("--password", default=None, help="override the --target profile's password")
+    replay_p.add_argument("--allowlist", default=None, help="override the --target profile's allowlist JSON path")
     replay_p.add_argument("--headed", action="store_true")
     replay_p.add_argument("--evidence-dir", default=None)
     replay_p.set_defaults(func=cmd_replay)
