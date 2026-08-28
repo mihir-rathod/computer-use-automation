@@ -172,11 +172,21 @@ curl -s -X POST http://127.0.0.1:8020/capabilities/meridian.balance_inquiry/invo
   -d '{"params": {"member_id": "100987"}, "target": "meridian"}'
 ```
 
-Or open `http://127.0.0.1:8020/chat` and type a request in plain language, e.g. *"look up the
-balance for meridian member 100987"* or *"transfer $5 from 100987-S0001 to 100987-MMKT-5 for
-member 100987"* -- check "Show browser" first to watch the real Chromium window drive
-MERIDIAN's actual pages. Every run (chatbot, API, or CLI) shows up immediately at
-`http://127.0.0.1:8020/dashboard/runs` with its status, structured outputs, and full evidence.
+Or open `http://127.0.0.1:8020/chat` and type a request in plain language -- check "Show browser"
+first to watch the real Chromium window drive MERIDIAN's actual pages. Every run (chatbot, API,
+or CLI) shows up immediately at `http://127.0.0.1:8020/dashboard/runs` with its status,
+structured outputs, and full evidence.
+
+A message has to include *every* field a capability requires, or it gets declined and asked for
+what's missing rather than run against the wrong capability:
+
+| Capability | Required fields | Try saying |
+|---|---|---|
+| Balance inquiry | `member_id` | "look up the balance for meridian member 100987" |
+| Funds transfer | `member_id`, `from_share`, `to_share`, `amount` | "transfer $5 from 100987-S0001 to 100987-MMKT-5 for member 100987" |
+| Open share | `member_id`, `share_type`, `initial_deposit` | "open a new share of type S0001 for member 100987 with an initial deposit of $25" |
+| Update member | `member_id`, `email`, `phone`, `address` -- all four, even to change just one | "update email to alan.turing@example.com, phone to 555-0177, and address to 99 Test Ave for member 100987" |
+| Place hold | `member_id`, `share`, `reason_code` | "place a hold on member 100987's share 100987-S0001 for reason code FRAUD" |
 
 All 7 MERIDIAN functions are recorded under `/artifacts/meridian.*.json` and replay the same
 way: `meridian.signon` (precondition for the rest), `meridian.balance_inquiry`,
