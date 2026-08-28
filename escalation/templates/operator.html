@@ -58,7 +58,7 @@
 {% endfor %}
 </table>
 
-<h2>Perform an action manually</h2>
+<h2>Step 1 &mdash; Perform an action manually</h2>
 <div class="panel">
 <form method="post" action="/operator/{{ session_id }}/act">
   <label for="action_kind">Action</label>
@@ -80,6 +80,14 @@
 </form>
 </div>
 
+<div class="reason-box">
+  <strong>Resume Automation is a separate step, below</strong> &mdash; it does not submit the form
+  above. Click <strong>Perform</strong> first and confirm the action actually executed (the
+  screenshot/state updates), <em>then</em> click Resume. Clicking Resume on its own just retries
+  the original unconfirmed action and fails again.
+</div>
+
+<h2>Step 2 &mdash; Resume Automation</h2>
 <form method="post" action="/operator/{{ session_id }}/resume">
   <button type="submit" class="btn-resume">Resume Automation</button>
 </form>

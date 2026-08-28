@@ -38,9 +38,16 @@
   details.fields table { border-collapse: collapse; margin-top: 8px; width: 100%; }
   details.fields th, details.fields td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid #eee; vertical-align: top; }
   details.fields code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
+  .op-console-fixed {
+    position: fixed; top: 14px; right: 16px; z-index: 100;
+    padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    background: #2a5adf; color: #fff; text-decoration: none; box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+  }
+  .op-console-fixed:hover { background: #1f47b8; }
 </style>
 </head>
 <body>
+<a class="op-console-fixed" href="{{ operator_console_url }}" target="_blank" rel="noopener">Operator console &#8599;</a>
 <nav class="top">
   <a href="/dashboard">Catalog</a>
   <a href="/dashboard/runs">Run History</a>
@@ -110,10 +117,24 @@
       const data = await resp.json();
       if (isEditingForm()) return;
       if (!data.pending) { clearInterval(iv); }
+      // location.reload() otherwise snaps the page back to the top every 1.5s while a run is
+      // pending -- found live, the hard way: it makes clicking the operator console link (or
+      // anything else up-page) practically impossible during exactly the window you'd need to.
+      // sessionStorage survives a reload (unlike a JS variable), so scroll position round-trips.
+      sessionStorage.setItem("chatScrollY", String(window.scrollY));
       location.reload();
     } catch (e) { /* server not reachable mid-refresh -- ignore, try again next tick */ }
   }, 1500);
 </script>
 {% endif %}
+<script>
+  // Runs on every load, not just the auto-refresh path, so a manual refresh preserves scroll
+  // too. Cleared immediately after reading so a later fresh visit doesn't jump around.
+  const savedScrollY = sessionStorage.getItem("chatScrollY");
+  if (savedScrollY !== null) {
+    sessionStorage.removeItem("chatScrollY");
+    window.scrollTo(0, parseInt(savedScrollY, 10));
+  }
+</script>
 </body>
 </html>
