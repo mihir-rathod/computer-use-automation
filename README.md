@@ -173,7 +173,7 @@ curl -s -X POST http://127.0.0.1:8020/capabilities/meridian.balance_inquiry/invo
 ```
 
 Or open `http://127.0.0.1:8020/chat` and type a request in plain language, e.g. *"look up the
-balance for meridian member 100987"* or *"transfer $5 from 100987-S0001-4 to 100987-MMKT-5 for
+balance for meridian member 100987"* or *"transfer $5 from 100987-S0001 to 100987-MMKT-5 for
 member 100987"* -- check "Show browser" first to watch the real Chromium window drive
 MERIDIAN's actual pages. Every run (chatbot, API, or CLI) shows up immediately at
 `http://127.0.0.1:8020/dashboard/runs` with its status, structured outputs, and full evidence.
