@@ -33,6 +33,11 @@
   .send-row { display: flex; gap: 8px; }
   .send-row input[type=text] { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
   .send-row button { padding: 10px 18px; border: none; border-radius: 6px; background: #2a5adf; color: white; font-weight: 600; font-size: 14px; cursor: pointer; }
+  details.fields { margin: 4px 0 16px; font-size: 13px; }
+  details.fields summary { cursor: pointer; color: #2a5adf; font-weight: 500; }
+  details.fields table { border-collapse: collapse; margin-top: 8px; width: 100%; }
+  details.fields th, details.fields td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid #eee; vertical-align: top; }
+  details.fields code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -42,8 +47,21 @@
   <a class="active" href="/chat">Chatbot</a>
 </nav>
 <h1>Capability Chatbot</h1>
-<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for meridian member 100987"</em> or <em>"transfer $5 from 100987-S0001-4 to 100987-MMKT-5 for member 100987"</em>.</p>
+<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for meridian member 100987"</em> or <em>"transfer $5 from 100987-S0001 to 100987-MMKT-5 for member 100987"</em>.</p>
 <p class="meta">If a request needs a human (an irreversible action, or something that got stuck), it pauses here -- keep the <a href="{{ operator_console_url }}" target="_blank" rel="noopener">operator console</a> open in another tab to catch it.</p>
+
+<details class="fields">
+  <summary>Required fields per capability -- include all of them, every time</summary>
+  <table>
+    <tr><th>Capability</th><th>Required fields</th></tr>
+    <tr><td>Balance inquiry</td><td><code>member_id</code></td></tr>
+    <tr><td>Funds transfer</td><td><code>member_id</code>, <code>from_share</code>, <code>to_share</code>, <code>amount</code></td></tr>
+    <tr><td>Open share</td><td><code>member_id</code>, <code>share_type</code>, <code>initial_deposit</code></td></tr>
+    <tr><td>Update member</td><td><code>member_id</code>, <code>email</code>, <code>phone</code>, <code>address</code> -- all four, even to change just one</td></tr>
+    <tr><td>Place hold</td><td><code>member_id</code>, <code>share</code>, <code>reason_code</code></td></tr>
+  </table>
+  <p style="margin:8px 0 0;color:#888;">A message missing a required field gets declined with a plain-text reply asking for it, instead of silently running the wrong capability.</p>
+</details>
 
 <div class="transcript">
   {% for turn in history %}

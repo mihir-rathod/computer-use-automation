@@ -116,6 +116,35 @@ def _build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
     return [types.Tool(function_declarations=declarations)], by_function_name
 
 
+# Found by actually testing the chatbot with an incomplete request ("update the email of
+# member 100987" -- no phone/address), not designed defensively up front: when a capability's
+# required args aren't all present in the message, Gemini doesn't reliably follow
+# SYSTEM_INSTRUCTION's "ask for what's missing" -- it silently substitutes a *different*
+# capability it CAN fully satisfy (balance_inquiry, needing only member_id) instead of
+# declining. Three system-prompt rewrites failed to stop this reliably; one variant "fixed" the
+# substitution but then fabricated placeholder values for the missing fields instead, which is
+# worse (that's fake data that would actually reach MERIDIAN). This is a code-level guardrail
+# instead: does the message contain at least one word actually characteristic of the capability
+# Gemini picked? If not, the pick is almost certainly wrong -- decline rather than invoke.
+_CAPABILITY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "meridian.balance_inquiry": ("balance", "look up", "lookup"),
+    "mockbank.member_balance_lookup": ("balance", "look up", "lookup"),
+    "meridian.update_member": ("update", "contact", "email", "phone", "address", "change the"),
+    "meridian.funds_transfer": ("transfer",),
+    "meridian.open_share": ("open a", "open new", "new share", "open share"),
+    "meridian.place_hold": ("hold",),
+    "mockbank.open_subaccount": ("open", "sub-account", "subaccount", "new account"),
+}
+
+
+def _capability_matches_message(capability_id: str, message: str) -> bool:
+    keywords = _CAPABILITY_KEYWORDS.get(capability_id, ())
+    if not keywords:
+        return True  # no keyword list defined for this capability -- don't block on it
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in keywords)
+
+
 def _invoke(capability_id: str, args: dict[str, Any], target: str, evidence_dir: str | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {
         "params": args, "target": target,
@@ -268,6 +297,19 @@ def chat_send(message: str = Form(...), headed: bool = Form(False), slow_mo: int
     artifact = by_function_name.get(fn.name)
     if artifact is None:
         _HISTORY.append({"role": "assistant", "text": f"Model picked an unrecognized tool ('{fn.name}').", "done": True})
+        return RedirectResponse("/chat", status_code=303)
+
+    if not _capability_matches_message(artifact.capability_id, message):
+        _HISTORY.append({
+            "role": "assistant",
+            "text": (
+                f"I picked \"{artifact.name}\" for that, but I'm not confident it's actually "
+                "what you meant -- likely because a specific value this needs (an exact email, "
+                "phone, address, share, or reason) wasn't in the message. Try rephrasing with "
+                "every specific value included."
+            ),
+            "done": True,
+        })
         return RedirectResponse("/chat", status_code=303)
 
     # Computed here, not left to run_replay's own default, so the run's id (== its operator
