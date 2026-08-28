@@ -280,6 +280,16 @@
         },
         "outcome": "validation_error",
         "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Please correct the following",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
       }
     ],
     "recoverable": [

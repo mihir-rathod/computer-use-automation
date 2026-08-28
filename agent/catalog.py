@@ -101,6 +101,12 @@ def _meridian_error_handling() -> ErrorHandling:
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="is not authorized to perform this function"), outcome="permission_denied"),
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="TRANSACTION REJECTED"), outcome="validation_error"),
             BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="could not be validated"), outcome="validation_error"),
+            # A third natural-text variant, found live (not anticipated): Update Member's own
+            # field-level validation ("Phone number is not valid.") renders as "Please correct
+            # the following:" plus a bulleted reason -- distinct wording from funds_transfer's
+            # validation text above. Confirms this module's own docstring warning that the
+            # injected copy isn't the only real-world rendering, again.
+            BusinessOutcomeRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="Please correct the following"), outcome="validation_error"),
         ],
         recoverable=[
             RecoverableRule(signal=Signal(type=SignalType.TEXT_PRESENT, value="YOUR SESSION HAS TIMED OUT"), action=RecoveryAction.REAUTHENTICATE_AND_RESUME),

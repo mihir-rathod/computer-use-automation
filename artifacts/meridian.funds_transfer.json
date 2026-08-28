@@ -236,7 +236,8 @@
       { "signal": { "type": "text_present", "value": "No member records matched your search." }, "outcome": "not_found", "output_field": "status" },
       { "signal": { "type": "text_present", "value": "is not authorized to perform this function" }, "outcome": "permission_denied", "output_field": "status" },
       { "signal": { "type": "text_present", "value": "TRANSACTION REJECTED" }, "outcome": "validation_error", "output_field": "status" },
-      { "signal": { "type": "text_present", "value": "could not be validated" }, "outcome": "validation_error", "output_field": "status" }
+      { "signal": { "type": "text_present", "value": "could not be validated" }, "outcome": "validation_error", "output_field": "status" },
+      { "signal": { "type": "text_present", "value": "Please correct the following" }, "outcome": "validation_error", "output_field": "status" }
     ],
     "recoverable": [
       { "signal": { "type": "text_present", "value": "YOUR SESSION HAS TIMED OUT" }, "action": "reauthenticate_and_resume" },
