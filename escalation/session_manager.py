@@ -33,6 +33,18 @@ class SessionMode(str, Enum):
     HUMAN_ACTIVE = "human_active"
 
 
+class SessionCancelled(Exception):
+    """Raised out of pause() when an operator gives up on a run instead of resuming it. Only
+    ever raised while genuinely blocked in pause()'s own queue-wait loop -- never while a live
+    Playwright action is in flight -- so this is safe to interrupt from another thread; nothing
+    here touches the page directly (see module docstring)."""
+
+    def __init__(self, reason: str, step_id: str | None = None):
+        self.reason = reason
+        self.step_id = step_id
+        super().__init__(reason)
+
+
 @dataclass
 class InterventionRequest:
     reason: str
@@ -73,6 +85,7 @@ class SessionManager:
 
         self._command_queue: queue.Queue[HumanCommand] = queue.Queue()
         self._resume_event = threading.Event()
+        self._cancel_event = threading.Event()
         self._lock = threading.Lock()
 
     # ---- called by the automation thread -------------------------------------------------
@@ -94,8 +107,9 @@ class SessionManager:
         if self.evidence_logger is not None:
             self.evidence_logger.log("system", "pause", reason=reason, step_id=step_id)
         self._resume_event.clear()
+        self._cancel_event.clear()
 
-        while not self._resume_event.is_set():
+        while not self._resume_event.is_set() and not self._cancel_event.is_set():
             try:
                 command = self._command_queue.get(timeout=poll_interval)
             except queue.Empty:
@@ -114,6 +128,14 @@ class SessionManager:
                 self.latest_observed = self.surface.perceive(actor="human")
                 self.mode = SessionMode.PAUSED  # still paused, waiting for an explicit Resume
 
+        if self._cancel_event.is_set():
+            with self._lock:
+                self.mode = SessionMode.AUTOMATION
+                self.pause_reason = None
+            if self.evidence_logger is not None:
+                self.evidence_logger.log("system", "cancel", step_id=step_id)
+            raise SessionCancelled(reason="cancelled by operator", step_id=step_id)
+
         with self._lock:
             self.mode = SessionMode.AUTOMATION
             self.pause_reason = None
@@ -127,6 +149,13 @@ class SessionManager:
 
     def resume(self) -> None:
         self._resume_event.set()
+
+    def cancel(self) -> None:
+        """Give up on this run instead of resuming it. Only interrupts pause()'s own
+        queue-wait loop (a plain blocking wait, safe to break from another thread) -- never a
+        live Playwright call, which is never safe to touch cross-thread. Raises
+        SessionCancelled on the automation thread, out of pause() itself."""
+        self._cancel_event.set()
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

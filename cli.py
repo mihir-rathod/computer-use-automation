@@ -103,6 +103,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     try:
         browser = p.chromium.launch(headless=not args.headed, slow_mo=args.slow_mo)
         page = browser.new_page()
+        page.set_default_timeout(runtime.DEFAULT_ACTION_TIMEOUT_MS)
         page.goto(f"{target['base_url']}{target['login_path']}")
 
         surface = WebSurface(page, base_url=target["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)

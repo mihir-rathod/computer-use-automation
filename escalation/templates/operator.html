@@ -32,6 +32,10 @@
   button { margin-top: 12px; padding: 8px 16px; border: none; border-radius: 5px; font-size: 14px; font-weight: 600; cursor: pointer; }
   .btn-primary { background: #2a5adf; color: white; }
   .btn-resume { background: #2a7a4a; color: white; }
+  .btn-cancel { background: #ffffff; color: #a5333a; border: 1px solid #e0b3b3 !important; }
+  .btn-cancel:hover { background: #fdf1ef; }
+  .give-up-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .give-up-row .hint { font-size: 12px; color: #888; }
   .stale-banner { display: none; background: #eef4ff; border: 1px solid #b9cdfa; color: #1a3f9e; border-radius: 6px; padding: 8px 14px; margin-bottom: 12px; font-size: 13px; }
 </style>
 </head>
@@ -88,9 +92,15 @@
 </div>
 
 <h2>Step 2 &mdash; Resume Automation</h2>
-<form method="post" action="/operator/{{ session_id }}/resume">
-  <button type="submit" class="btn-resume">Resume Automation</button>
-</form>
+<div class="give-up-row">
+  <form method="post" action="/operator/{{ session_id }}/resume">
+    <button type="submit" class="btn-resume">Resume Automation</button>
+  </form>
+  <form method="post" action="/operator/{{ session_id }}/cancel" onsubmit="return confirm('Give up on this run? It will end as a hard failure and cannot be resumed after this.');">
+    <button type="submit" class="btn-cancel">Give Up on This Run</button>
+  </form>
+  <span class="hint">Give Up ends the run cleanly as a failure instead of leaving it paused indefinitely -- use it if the action genuinely can't be completed.</span>
+</div>
 
 {% if auto_refresh %}
 <script>

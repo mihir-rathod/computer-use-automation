@@ -32,6 +32,13 @@ REPO_ROOT = Path(__file__).resolve().parent
 EVIDENCE_ROOT = REPO_ROOT / "evidence"
 _operator_console_started = False
 
+# Playwright's own default (30s) is too long for a demo -- a wrong/stale locator value (e.g. a
+# share id that no longer exists) hangs the whole run for the full 30s before failing, which
+# looks indistinguishable from "stuck forever." Found live, the night before the demo. Shorter
+# means a bad value fails fast and visibly instead of sitting there; still generous for a real
+# page load or a genuinely slow action against the live site.
+DEFAULT_ACTION_TIMEOUT_MS = 8000
+
 # Adapting to a new target is choosing a profile here, not writing code -- each entry pairs a
 # base URL with the allowlist config and login capability that go with it. `--target`/`target`
 # selects one; any of base_url/username/password/allowlist still overrides its piece explicitly.
@@ -174,6 +181,7 @@ def run_replay(
         try:
             browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo)
             page = browser.new_page()
+            page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
             page.goto(f"{profile['base_url']}{profile['login_path']}")
 
             surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)

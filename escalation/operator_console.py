@@ -115,3 +115,12 @@ async def operator_resume(session_id: str):
         return HTMLResponse(f"No session '{session_id}'.", status_code=404)
     session.resume()
     return RedirectResponse(f"/operator/{session_id}", status_code=303)
+
+
+@app.post("/operator/{session_id}/cancel")
+async def operator_cancel(session_id: str):
+    session = get_session(session_id)
+    if session is None:
+        return HTMLResponse(f"No session '{session_id}'.", status_code=404)
+    session.cancel()
+    return RedirectResponse(f"/operator/{session_id}", status_code=303)

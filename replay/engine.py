@@ -26,7 +26,7 @@ from artifacts_lib.schema import (
     Step,
 )
 from artifacts_lib.storage import DEFAULT_ARTIFACTS_DIR, load_artifact_by_id
-from escalation.session_manager import SessionManager
+from escalation.session_manager import SessionCancelled, SessionManager
 from evidence_lib.logger import EvidenceLogger
 from replay.coercion import coerce_output
 from replay.result import ReplayError, ReplayResult, ReplayStatus
@@ -160,7 +160,11 @@ class ReplayEngine:
             if outcome is None:
                 if self.session_manager is not None:
                     self.session_manager.update_observed(self.surface.perceive())
-                    self.session_manager.pause(reason="all steps completed but success_checkpoint was not met", step_id=None)
+                    try:
+                        self.session_manager.pause(reason="all steps completed but success_checkpoint was not met", step_id=None)
+                    except SessionCancelled as sc:
+                        self._escalated = True
+                        raise _HardFailure(ReplayError(message=sc.reason), completed) from None
                     self._escalated = True
                     if not self.surface.check_signal(substitute_signal(artifact.success_checkpoint, variables)):
                         raise _HardFailure(ReplayError(message="success_checkpoint still not met after human intervention"), completed)
@@ -211,7 +215,11 @@ class ReplayEngine:
         # via the operator console, then resume.
         if self.session_manager is not None and depth == 0:
             self.session_manager.update_observed(self.surface.perceive())
-            self.session_manager.pause(reason=failure_message, step_id=step.step_id)
+            try:
+                self.session_manager.pause(reason=failure_message, step_id=step.step_id)
+            except SessionCancelled as sc:
+                self._escalated = True
+                raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason), completed_so_far) from None
             self._escalated = True
 
             # Don't blindly redo the original action on resume -- the human may already have

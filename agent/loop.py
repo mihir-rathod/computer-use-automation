@@ -23,7 +23,7 @@ from google.genai import types
 from agent.gemini_client import GeminiClient
 from agent.tools import ALL_TOOLS, ToolCall, is_terminal, to_action
 from artifacts_lib.schema import ActionType
-from escalation.session_manager import SessionManager
+from escalation.session_manager import SessionCancelled, SessionManager
 from evidence_lib.logger import EvidenceLogger
 from surface.base import Action, ActionResult, ObservedState, Surface
 
@@ -171,7 +171,13 @@ class DiscoveryLoop:
         if self.session_manager is not None and stop_reason in _STUCK_REASONS:
             if self.session_manager.latest_observed is None:
                 self.session_manager.update_observed(self.surface.perceive(actor="agent"))
-            self.session_manager.pause(reason=f"discovery stuck: {stop_reason} -- {reasoning or 'no reasoning given'}")
+            # Discovery never retries after this pause either way (it already gave up before
+            # reaching here) -- cancelling just means skip straight to returning, same as a
+            # normal resume would.
+            try:
+                self.session_manager.pause(reason=f"discovery stuck: {stop_reason} -- {reasoning or 'no reasoning given'}")
+            except SessionCancelled:
+                pass
             escalated = True
 
         return DiscoveryResult(stop_reason=stop_reason, reasoning=reasoning, transcript=transcript, escalated=escalated)
