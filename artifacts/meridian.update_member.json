@@ -185,12 +185,12 @@
         ]
       },
       "params": {
-        "text": "member{{member_id}}@example.com"
+        "text": "{{email}}"
       },
       "output_binding": null,
       "checkpoint": {
         "type": "element_value_equals",
-        "value": "member{{member_id}}@example.com",
+        "value": "{{email}}",
         "target": {
           "semantic_description": "textbox",
           "locators": [
@@ -418,8 +418,8 @@
   },
   "provenance": {
     "discovered_by": "gemini-flash-lite-latest",
-    "discovery_run_id": "discovery_run_20260828T004015Z",
-    "created_at": "2026-08-28T00:40:31.432856Z",
+    "discovery_run_id": "discovery_run_20260828T224721Z",
+    "created_at": "2026-08-28T22:48:45.311344Z",
     "reviewed": false,
     "note": "LLM-discovered; not yet human-reviewed."
   },
