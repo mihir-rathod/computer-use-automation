@@ -1,0 +1,14 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>Main menu</h3>
+<table class="{{ ui.c('menu') }}">
+<tr><td><a href="/legacy/patients">{{ ui.t("Patient lookup") }}</a></td></tr>
+<tr><td><a href="/legacy/schedule">{{ ui.t("Today's schedule") }}</a></td></tr>
+<tr><td><a href="/legacy/fn/cancel">{{ ui.t("Cancel appointment") }}</a></td></tr>
+<tr><td><a href="/legacy/fn/reschedule">{{ ui.t("Reschedule") }}</a></td></tr>
+<tr><td><a href="/legacy/fn/claim">{{ ui.t("Submit claim") }}</a></td></tr>
+<tr><td><a href="/legacy/fn/refund">{{ ui.t("Issue refund") }}</a></td></tr>
+<tr><td><a href="/legacy/fn/writeoff">{{ ui.t("Write off") }}</a></td></tr>
+{% if actor.role == 'supervisor' %}<tr><td><a href="/legacy/approvals">{{ ui.t("Approvals") }}</a></td></tr>{% endif %}
+</table>
+{% endblock %}

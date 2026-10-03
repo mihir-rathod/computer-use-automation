@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+evidence
+clinic/modern/node_modules
+clinic/modern/dist
+tests
+.env

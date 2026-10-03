@@ -1,0 +1,19 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ ui.t("Today's schedule") }}</h3>
+{% if problems %}<p class="err">Please correct the following:</p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+<form method="get" action="/legacy/schedule">
+<table><tr><td>Date</td><td><input type="text" name="{{ ui.n('date') }}" size="12" value="{{ date }}"></td>
+<td>Provider</td><td><select name="{{ ui.n('provider') }}"><option value="">All</option>
+{% for p in providers %}<option value="{{ p }}" {{ "selected" if p == provider }}>{{ p }}</option>{% endfor %}</select></td>
+<td><input type="submit" value="{{ ui.t('Show') }}"></td></tr></table>
+</form>
+{% if rows is not none %}
+<table class="data {{ ui.c('schedule') }}">
+<tr><td><b>Appt no.</b></td><td><b>Time</b></td><td><b>Provider</b></td><td><b>MRN</b></td><td><b>Patient</b></td><td><b>Reason</b></td><td><b>Status</b></td></tr>
+{% for r in rows %}<tr><td>{{ r.number }}</td><td>{{ r.starts_at|fmt_time }}</td><td>{{ r.provider }}</td><td>{{ r.mrn }}</td>
+<td>{{ r.last_name }}, {{ r.first_name }}</td><td>{{ r.reason }}</td><td>{{ r.status }}</td></tr>{% endfor %}
+</table>
+{% if not rows %}<p>No appointments scheduled.</p>{% endif %}
+{% endif %}
+{% endblock %}

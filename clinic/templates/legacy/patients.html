@@ -1,0 +1,28 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ ui.t("Patient lookup") }}</h3>
+<form method="get" action="/legacy/patients">
+<table>
+<tr><td>MRN</td><td><input type="text" name="{{ ui.n('mrn') }}" id="{{ ui.i('mrn') }}" size="14" value="{{ q.mrn }}"></td></tr>
+<tr><td>Last name</td><td><input type="text" name="{{ ui.n('last') }}" size="20" value="{{ q.last }}"></td></tr>
+<tr><td>Date of birth</td><td><input type="text" name="{{ ui.n('dob') }}" size="12" value="{{ q.dob }}"> (YYYY-MM-DD)</td></tr>
+<tr><td></td><td><input type="submit" value="{{ ui.t('Search') }}"></td></tr>
+</table>
+</form>
+{% if problems %}<p class="err">Please correct the following:</p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+{% if result is not none %}
+  {% if result.total == 0 %}
+  <p class="err">No patients matched your search.</p>
+  {% else %}
+  <p>{{ result.total }} patient(s) found. Page {{ result.page }} of {{ result.pages }}.</p>
+  <table class="data {{ ui.c('results') }}" id="{{ ui.i('results') }}">
+  <tr><td><b>MRN</b></td><td><b>Name</b></td><td><b>Date of birth</b></td><td><b>Insurer</b></td><td></td></tr>
+  {% for p in result["items"] %}
+  <tr><td>{{ p.mrn }}</td><td>{{ p.last_name }}, {{ p.first_name }}</td><td>{{ p.dob }}</td><td>{{ p.insurer or "SELF-PAY" }}</td>
+  <td><a href="/legacy/patients/{{ p.id }}">{{ ui.t("Select") }}</a></td></tr>
+  {% endfor %}
+  </table>
+  <p>{% if prev_url %}<a href="{{ prev_url }}">{{ ui.t("Prev") }}</a>{% endif %} {% if next_url %}<a href="{{ next_url }}">{{ ui.t("Next") }}</a>{% endif %}</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

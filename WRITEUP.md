@@ -29,6 +29,32 @@ escalation/ SessionManager (pause / take over / resume) + operator console
 runtime.py  run_replay(): the one path CLI, API and chatbot all call
 ```
 
+## The clinic target
+
+The platform needs something it can be tested and measured against that it does not control the
+behavior of, and that a real browser can reach. `clinic/` is that: a fictional clinic portal with
+a legacy server-rendered skin and a modern React skin over one set of business rules
+(`clinic/services.py`), so a rule cannot differ between skins.
+
+What makes it a test target rather than just an app:
+
+- **Ground truth.** Every read, review, denial, rejection and state change is written to an audit
+  log by the domain layer, not the UI. `effect=1` marks rows where state really changed, so a test
+  can assert "exactly one refund was issued" independent of what any screen displayed.
+- **Idempotent reset** to a deterministic seed, which also clears sessions, chaos rules and drift.
+- **Chaos rules**: latency, 500s, a maintenance page whose Continue link does not go back, session
+  expiry, rate limiting, each matchable by method and path.
+- **A duplicate-submit guard that can be switched off.** With it on, a second confirm of the same
+  transaction is blocked and audited. With it off, a retried refund really posts twice. That lets
+  the platform prove it does not depend on the target to stop a double-post.
+- **UI drift** in four levels (renamed ids and classes, then labels, then form field names).
+- **Supervisor gating at submit time, not view time**, and a refund cap with a two-person approval
+  flow, so permission-denied and pending-approval are real business outcomes.
+
+The legacy skin is awkward on purpose: unlabeled inputs (so role locators find nothing and CSS
+`name` fallbacks are needed), headerless tables, identical "Claim" / "Refund" links on every row,
+and results returned straight from a POST so a refresh resubmits.
+
 ## Decisions and why
 
 **The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
@@ -100,7 +126,8 @@ Things that broke when the system met reality, and what changed.
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Core behavior | 96 offline tests (schema, replay engine, safety, session manager, operator console, API, dashboard, web surface) |
+| Platform behavior | 96 offline tests (schema, replay engine, safety, session manager, operator console, API, dashboard, web surface) |
+| Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | LLM discovery works end to end | `tests/test_discovery_live.py` (skips without `GEMINI_API_KEY`) |
 | Measured success and recovery rates | **Not yet measured.** A benchmark harness is planned. |
 
@@ -133,13 +160,20 @@ These are verified against the code as of this writing.
   leave the browser open.
 - **The chatbot is minimal.** Gemini only, no conversation memory, one capability per message,
   a hand-maintained keyword guard, and a server-rendered page that polls.
-- **One test target.** The offline suite only exercises the bundled MockBank app, so results
-  say little yet about generalization to other apps.
+- **No capabilities exist for the clinic target yet.** The platform has only been run against
+  MockBank. The clinic app is built and tested on its own, but nothing has been discovered,
+  recorded or replayed against it, so no claim about the platform on this target is made.
+- **Clinic limits.** Browser tests cover search, contact update, reschedule, cancel, CSV download,
+  session expiry, drift, duplicate submit and maintenance; the claim, refund, write-off and
+  approval flows are covered at the API and server-rendered-HTML level, not by a browser. Chaos
+  applies to `/legacy` and `/api` only. State is in memory unless `CLINIC_DB_PATH` is set. Drift
+  covers all four levels on the legacy skin but only labels on the modern skin. The Render
+  blueprint (`render.yaml`) has not been deployed.
 
 ## What is next
 
-A self-hosted target app with an audit-log API as ground truth, fault and drift injection, and a
-reset endpoint; supervised capture of irreversible steps; locator repair proposals that a human
+Discovering and recording the clinic target's capabilities; deploying it; supervised capture of
+irreversible steps; locator repair proposals that a human
 approves; replay stability waits and idempotency; async, persisted runs with API auth; one
 unified UI; and a benchmark that reports success rate, recovery rate and discovery cost against
 zero-token replay. None of these are claimed until they are built and measured.

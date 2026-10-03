@@ -1,0 +1,11 @@
+# Render blueprint for the clinic target (free web service). Free services sleep when idle, so the
+# platform waits for /healthz before a run starts. Not yet deployed or verified against Render.
+services:
+  - type: web
+    name: larkspur-clinic-ops
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: CLINIC_TEST_TOKEN
+        generateValue: true

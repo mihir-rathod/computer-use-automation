@@ -1,0 +1,21 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ ui.t("Reschedule") }} appointment {{ appt.number }}</h3>
+<p>{{ appt.patient.last_name }}, {{ appt.patient.first_name }} &mdash; {{ appt.provider }}, currently {{ appt.starts_at|fmt_dt }}</p>
+{% if banner %}<p class="ok">{{ banner }}</p>{% endif %}
+{% if problems %}<p class="err">Please correct the following:</p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+<form method="get" action="/legacy/appointments/{{ appt.number }}/reschedule">
+<table><tr><td>New date</td><td><input type="text" name="{{ ui.n('date') }}" size="12" value="{{ date }}"> (YYYY-MM-DD)</td>
+<td><input type="submit" value="{{ ui.t('Continue') }}"></td></tr></table>
+</form>
+{% if slots is not none %}
+  {% if slots %}
+  <form method="post" action="/legacy/appointments/{{ appt.number }}/reschedule">
+  <input type="hidden" name="{{ ui.n('date') }}" value="{{ date }}">
+  <table><tr><td>New time</td><td><select name="{{ ui.n('time') }}">
+  {% for s in slots %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></td>
+  <td><input type="submit" value="{{ ui.t('Save changes') }}"></td></tr></table>
+  </form>
+  {% else %}<p class="err">No times are available on that date.</p>{% endif %}
+{% endif %}
+{% endblock %}

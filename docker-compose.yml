@@ -1,0 +1,14 @@
+services:
+  clinic:
+    build: .
+    ports:
+      - "8100:8100"
+    environment:
+      # Set a token to lock the /_test endpoints (always do this on a public deployment).
+      CLINIC_TEST_TOKEN: ${CLINIC_TEST_TOKEN:-}
+      CLINIC_SESSION_IDLE_SECONDS: ${CLINIC_SESSION_IDLE_SECONDS:-600}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

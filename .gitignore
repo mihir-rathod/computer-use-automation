@@ -220,3 +220,5 @@ __marimo__/
 # Run output and OS cruft
 evidence/
 .DS_Store
+clinic/modern/node_modules/
+clinic/modern/dist/

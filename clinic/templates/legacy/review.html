@@ -1,0 +1,17 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ review.title }}</h3>
+<table class="data">
+{% for line in review.lines %}<tr><td>{{ line.label }}</td><td>{{ line.value }}</td></tr>{% endfor %}
+</table>
+{% for w in review.warnings %}<p class="warn">{{ w }}</p>{% endfor %}
+{% if review.irreversible %}<p class="err">This will post immediately and cannot be reversed from this screen.</p>{% endif %}
+<table><tr>
+<td><form method="post" action="/legacy/transactions/confirm">
+<input type="hidden" name="{{ ui.n('txn') }}" value="{{ token }}">
+<input type="submit" value="{{ ui.t('Confirm') }}" id="{{ ui.i('confirm_btn') }}"></form></td>
+<td><form method="post" action="/legacy/transactions/discard">
+<input type="hidden" name="{{ ui.n('txn') }}" value="{{ token }}">
+<input type="submit" value="{{ ui.t('Back') }}"></form></td>
+</tr></table>
+{% endblock %}

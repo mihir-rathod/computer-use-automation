@@ -5,7 +5,9 @@ parameterized **artifact**. Every run after that is **deterministic replay**: no
 loop, no tokens spent, with safety gating, human escalation and a full evidence trail around it.
 
 > **Status: in active development on `dev`.** The core loop works end to end against a bundled
-> mock app. A self-hosted target, a unified UI and a measured benchmark are in progress. See
+> mock app, and a purpose-built clinic target app (with fault injection, UI drift and an audit
+> log) is now in the repo. No capabilities have been recorded against the clinic target yet. A
+> unified UI and a measured benchmark are still to come. See
 > [WRITEUP.md](WRITEUP.md) for the design, the incidents, and an honest list of what is not done.
 
 ## How it works
@@ -49,6 +51,7 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 | `evidence_lib/` | JSONL evidence logger and redaction |
 | `api/` | Capability API, chatbot, run dashboard |
 | `mockbank/` | Bundled legacy-style bank app used as a test target |
+| `clinic/` | Larkspur Clinic Ops: the self-hosted test target (legacy and React skins, JSON API, test kit) |
 | `artifacts/` | Saved capability artifacts |
 | `tests/` | Offline test suite |
 
@@ -92,15 +95,42 @@ uv run python cli.py replay --capability mockbank.member_balance_lookup --param 
 
 MockBank's demo login is `operator` / `bankdemo123` (a fixture credential, not a secret).
 
+## The clinic target app
+
+`clinic/` is a fictional clinic front-desk and billing portal built to be automated and measured.
+It has two skins over one set of business rules, plus a JSON API and a test kit.
+
+| Surface | Where | What it is |
+|---|---|---|
+| Legacy skin | `/legacy` | Server-rendered tables, unlabeled inputs, headerless tables, results returned from POSTs |
+| Modern skin | `/app` | React single-page app with async loading, modals, toasts, a session-expired dialog and a CSV download |
+| JSON API | `/api` | Every flow, with stable error codes (`/docs` for the OpenAPI page) |
+| Test kit | `/_test` | Audit-log API, idempotent reset, chaos rules, duplicate-guard switch, UI drift, a control panel at `/_test/panel` |
+
+Flows: patient search and detail, contact update, reschedule, and review -> confirm -> receipt for
+cancelling an appointment (with a late-cancellation fee), submitting an insurance claim, issuing a
+refund (above $200 needs supervisor approval) and writing off a balance (supervisor only).
+Roles are `frontdesk` / `desk-demo-123` and `supervisor` / `super-demo-123`. All data is synthetic.
+
+```bash
+uv run uvicorn clinic.app:app --port 8100          # legacy skin works immediately
+(cd clinic/modern && npm install && npm run build)  # needed once for the /app skin
+docker compose up --build                           # or: everything in one container
+```
+
+Set `CLINIC_TEST_TOKEN` on any deployment that is not purely local; every `/_test` endpoint then
+requires it. See [WRITEUP.md](WRITEUP.md) for what the test kit is for and what it does not cover.
+
 ## Tests
 
 ```bash
 uv run pytest
 ```
 
-The suite is offline: it starts MockBank in-process and drives a real Chromium against it. The
-live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY` is set.
-At the time of writing: 96 passing, 4 skipped without a key.
+The suite is offline: it starts MockBank and the clinic app in-process and drives a real Chromium
+against them. The live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY`
+is set, and the modern-skin browser tests skip until `clinic/modern` has been built.
+At the time of writing: 158 passing, 4 skipped without a key.
 
 ## What is not done yet
 

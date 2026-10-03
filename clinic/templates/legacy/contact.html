@@ -1,0 +1,16 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>Update contact information</h3>
+<p>{{ patient.last_name }}, {{ patient.first_name }} ({{ patient.mrn }})</p>
+{% if banner %}<p class="ok">{{ banner }}</p>{% endif %}
+{% if problems %}<p class="err">Please correct the following:</p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+<form method="post" action="/legacy/patients/{{ patient.id }}/contact">
+<table>
+<tr><td>Phone</td><td><input type="text" name="{{ ui.n('phone') }}" size="20" value="{{ form.phone }}"></td></tr>
+<tr><td>Email</td><td><input type="text" name="{{ ui.n('email') }}" size="34" value="{{ form.email }}"></td></tr>
+<tr><td>Address</td><td><input type="text" name="{{ ui.n('address') }}" size="60" value="{{ form.address }}"></td></tr>
+<tr><td></td><td><input type="submit" value="{{ ui.t('Save changes') }}"></td></tr>
+</table>
+</form>
+<p><a href="/legacy/patients/{{ patient.id }}">{{ ui.t('Back') }}</a></p>
+{% endblock %}
