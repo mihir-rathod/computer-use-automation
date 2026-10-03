@@ -1,13 +1,12 @@
-"""The capability API -- ASSIGNMENT_ORIGINAL.md 3.2: "a callable catalog... an agent invokes a
-capability by name with typed args and gets a structured result back, without knowing anything
-about the underlying UI." This is also the app the chatbot (api/chatbot.py, mounted below) and
-dashboard (Phase 5) live on -- one process, one port, for the whole demoable surface, per the
-brief's own "simpler is fine if justified" and "we do not reward... scaling infrastructure."
+"""The capability API -- a callable catalog: an agent invokes a capability by name with typed
+args and gets a structured result back, without knowing anything about the underlying UI. This is also the app the chatbot
+(api/chatbot.py, mounted below) and dashboard live on -- one process, one port for the whole
+demoable surface; simpler is fine while a single process is enough.
 
 Every invocation calls runtime.run_replay() -- the exact same execution path cli.py's `replay`
 command uses -- so this can never become a second implementation of "how do I run a capability",
 and can never become a way around the safety/evidence/escalation guarantees already built into
-that one path (3.5).
+that one path.
 
 Route handlers below are plain `def`, not `async def`, on purpose: run_replay() is a blocking,
 synchronous Playwright call that can take several seconds. FastAPI runs sync `def` handlers in a
@@ -85,9 +84,9 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
     HTTP-level errors (404, 422) are reserved for problems with the *call itself* -- an unknown
     capability_id, a malformed body. A replay that completes as a business outcome or even a
     hard failure is still a successful API call: 200, with that outcome in the body, matching
-    the brief's own "success, a known business outcome, or a failure with enough detail to
-    debug" contract (3.3) -- collapsing a hard failure into an HTTP error would blur exactly the
-    distinction that contract exists to keep clear.
+    the "success, a known business outcome, or a failure with enough detail to debug" contract --
+    collapsing a hard failure into an HTTP error would blur exactly the distinction that
+    contract exists to keep clear.
     """
     if body.target not in TARGET_PROFILES:
         raise HTTPException(status_code=422, detail=f"unknown target '{body.target}' -- known: {sorted(TARGET_PROFILES)}")

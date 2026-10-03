@@ -1,7 +1,7 @@
 """The one execution path for running a saved capability -- CLI `replay`, the capability API
 (api/app.py), and the chatbot all call `run_replay()` here, never reimplement it. This is what
-makes "don't let the wrapper become a way around the guardrails" (ASSIGNMENT_ORIGINAL.md 3.5)
-true structurally rather than by convention: every front door launches the same browser, builds
+makes "no front door can become a way around the guardrails" true structurally rather than by
+convention: every front door launches the same browser, builds
 the same SafetyPolicy, and runs the same ReplayEngine, so none of them can accidentally skip
 safety, evidence, or escalation. Extracted from cli.py once a second caller (the API) needed the
 exact same logic -- before that there was nothing to share yet.
@@ -34,9 +34,8 @@ _operator_console_started = False
 
 # Playwright's own default (30s) is too long for a demo -- a wrong/stale locator value (e.g. a
 # share id that no longer exists) hangs the whole run for the full 30s before failing, which
-# looks indistinguishable from "stuck forever." Found live, the night before the demo. Shorter
-# means a bad value fails fast and visibly instead of sitting there; still generous for a real
-# page load or a genuinely slow action against the live site.
+# looks indistinguishable from "stuck forever." Shorter means a bad value fails fast and visibly
+# instead of sitting there; still generous for a real page load or a genuinely slow action.
 DEFAULT_ACTION_TIMEOUT_MS = 8000
 
 # Adapting to a new target is choosing a profile here, not writing code -- each entry pairs a
@@ -50,14 +49,6 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "allowlist": DEFAULT_ALLOWLIST_PATH,
         "login_capability": "mockbank.login",
         "login_path": "/login",
-    },
-    "meridian": {
-        "base_url": "https://web-sample.interface-hiring.com",
-        "username": "teller1",
-        "password": "password",
-        "allowlist": REPO_ROOT / "safety" / "allowlist_meridian.json",
-        "login_capability": "meridian.signon",
-        "login_path": "/signon",
     },
 }
 
@@ -138,10 +129,9 @@ def run_replay(
     -- see module docstring for why that matters.
 
     `slow_mo` (milliseconds of pause Playwright inserts before each action) is separate from
-    `headed` on purpose, matching Playwright's own convention: a fast, real replay against
-    MERIDIAN completes in a couple of seconds even headed, which is correct for production but
-    too fast for a human to actually watch happen. For a live demo, pass both --headed and a
-    --slow-mo (e.g. 500-800ms) together.
+    `headed` on purpose, matching Playwright's own convention: a fast, real replay completes in
+    a couple of seconds even headed, which is correct for production but too fast for a human to
+    actually watch happen. To watch one, pass both --headed and a --slow-mo (e.g. 500-800ms).
     """
     profile = resolve_target(target, base_url, username, password, allowlist)
     artifact = load_artifact_by_id(capability_id)

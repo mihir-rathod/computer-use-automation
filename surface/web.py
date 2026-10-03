@@ -1,12 +1,12 @@
-"""WebSurface -- the only Surface implementation built (ASSIGNMENT_ORIGINAL.md 3.7 asks for a
-credible design story for other surfaces, not that we build them; see REPORT.md heading 4).
+"""WebSurface -- the only Surface implementation built; other surfaces (legacy web,
+desktop) are a design extension, not built.
 
 Backed by Playwright. The accessibility tree (surface/aria.py, via aria_snapshot) is the
 primary perception channel; a screenshot is captured alongside for evidence/debugging, but the
 structured element list -- not pixels -- is what acting is driven from.
 
 Note on `params`: callers pass already-substituted values (e.g. a real member id, not
-"{{member_id}}"). Template substitution is the replay engine's job (Phase 5), not this layer's --
+"{{member_id}}"). Template substitution is the replay engine's job, not this layer's --
 Surface only knows how to act on a live page, not how an artifact's parameters map onto it.
 Likewise, EXTRACT returns a raw string; coercing it to the output_schema's declared type is also
 the replay engine's job -- Surface doesn't know about output_schema at all.
@@ -94,8 +94,8 @@ class WebSurface(Surface):
                 note="Fallback: element id present at discovery time, not guaranteed stable across tenants.",
             ))
         elif not element.name:
-            # No accessible name AND no id -- found against MERIDIAN CORE, whose legacy
-            # table-layout forms have no <label>/aria-label at all: the primary role locator
+            # No accessible name AND no id -- found against legacy table-layout forms with
+            # no <label>/aria-label at all: the primary role locator
             # above degrades to a bare role (e.g. "textbox") with nothing to disambiguate it,
             # which matches every same-role field on the page and is treated as no match at all
             # by resolve_target's "ambiguous match = no match" rule -- replay failed here with

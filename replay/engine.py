@@ -1,9 +1,8 @@
-"""The deterministic replay executor -- ASSIGNMENT_ORIGINAL.md 3.3, the production execution
-path. No LLM in the loop: every decision here is either "run the next step" or a classification
+"""The deterministic replay executor -- the production execution path. No LLM in the loop: every decision here is either "run the next step" or a classification
 against artifact-declared signals, never a model call.
 
-Classification order on any checkpoint failure (PROJECT_PLAN.md Section 3, and this is the
-central judgment call the whole error-handling design rests on):
+Classification order on any checkpoint failure (the central judgment call the whole
+error-handling design rests on):
   1. Does current state match a business_outcomes signal?  -> stop, return that business outcome.
   2. Does it match a recoverable signal?                    -> apply the recovery, re-check.
   3. Otherwise                                               -> hard failure, stop, report clearly.
@@ -71,14 +70,14 @@ class ReplayEngine:
         self.reauth_credentials = reauth_credentials
         # On a failure with no known business/recoverable signal, this is what pauses for a
         # human instead of failing immediately -- exactly once per step (see
-        # _run_step_with_recovery's depth==0 guard), ASSIGNMENT_ORIGINAL.md 3.6.
+        # _run_step_with_recovery's depth==0 guard).
         self.session_manager = session_manager
         # Accumulate, never reset mid-run: _reauthenticate() below calls self.run() recursively
         # on this same instance for the login sub-capability, and the outer call's final result
         # must still reflect anything that happened before reauthentication kicked in. Set only
-        # to True at the moment each condition actually fires (ASSIGNMENT_ORIGINAL.md 3.4's
-        # dashboard needs "recoverable"/"escalated" as run statuses in their own right, distinct
-        # from the underlying ReplayStatus).
+        # to True at the moment each condition actually fires (the dashboard needs
+        # "recoverable"/"escalated" as run statuses in their own right, distinct from the
+        # underlying ReplayStatus).
         self._escalated = False
         self._recovered = False
 
@@ -93,8 +92,8 @@ class ReplayEngine:
             ))
 
         # Backfill declared-but-not-required input_schema properties the caller omitted, with
-        # an empty string -- found via a real crash: memo is genuinely optional on MERIDIAN's
-        # own Funds Transfer form (no asterisk), but a step's params still reference {{memo}},
+        # an empty string -- found via a real crash: a field can be genuinely optional on the
+        # target's own form, but a step's params still reference {{name}},
         # and substitute() has no notion of "this template variable is allowed to be missing."
         # Only fills gaps for properties the artifact itself declares optional; validate_input
         # above already enforces required ones strictly, so this can't mask a real caller error.

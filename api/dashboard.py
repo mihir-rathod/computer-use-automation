@@ -1,7 +1,7 @@
-"""The dashboard -- ASSIGNMENT_ORIGINAL.md 3.4: "a lightweight UI to watch the system work: the
-capability catalog, run history (discovery and replay), each run's inputs and structured
-outputs, its status (success / business outcome / recoverable / failed / escalated), and the
-evidence your core already emits (steps, screenshots, DOM snapshots, timings, logs)."
+"""The dashboard -- a lightweight UI to watch the system work: the capability catalog, run
+history (discovery and replay), each run's inputs and structured outputs, its status (success /
+business outcome / recoverable / failed / escalated), and the evidence the core already emits
+(steps, screenshots, timings, logs).
 
 Read-only, server-rendered (Jinja2, matching every other UI in this repo), no new persistence:
 evidence already on disk under /evidence/*/ is the source of truth, this just reads it. Three
@@ -12,7 +12,7 @@ Every run -- discovery or replay -- gets a "system"/"run_start" event logged as 
 evidence dir exists (cli.py's cmd_discover, runtime.run_replay()), specifically so this page can
 identify what a run *is* even if it crashes or hangs before ever reaching a terminal result
 event -- an in-progress or dead run showing up as a blank, unlabeled row would defeat the whole
-point of a dashboard a reviewer debugs from.
+point of a dashboard you debug from.
 """
 from __future__ import annotations
 

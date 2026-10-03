@@ -1,5 +1,5 @@
 """Unit tests for the aria_snapshot(mode="ai") parser -- no browser needed. Fixture text is
-real captured output from MockBank pages (see PROJECT_PLAN.md 1.3 exploration), not invented.
+real captured output from MockBank pages, not invented.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""SessionManager -- ASSIGNMENT_ORIGINAL.md 3.6: pause automation, let a human operate the
+"""SessionManager -- pause automation, let a human operate the
 SAME live session (not a fresh one), then hand control back. Single-process, in-memory --
 justified the same way as the rest of this system ("simpler is fine if justified"): a real
 deployment would swap this for a persisted, multi-worker-safe session store, but the

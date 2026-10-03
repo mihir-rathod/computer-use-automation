@@ -1,7 +1,7 @@
 """Integration tests for the hand-written mockbank.open_subaccount artifact -- the capability
-that exercises validation_error (ASSIGNMENT_ORIGINAL.md 3.3's sixth named runtime condition,
-not covered by mockbank.member_balance_lookup) and a genuine irreversible, confirmation-gated
-step at full artifact/replay granularity (3.4), closing both gaps deliberately: member_balance_
+that exercises validation_error (not covered by mockbank.member_balance_lookup) and a genuine
+irreversible, confirmation-gated step at full artifact/replay granularity, closing both gaps
+deliberately: member_balance_
 lookup is read-only and never needed either.
 """
 from __future__ import annotations

@@ -1,5 +1,5 @@
-"""Unit tests for the safety module -- no browser needed. Per PROJECT_PLAN.md Section 8 step 6:
-"allowlist blocks an out-of-scope action, risk classifier correctly flags a submit-type action."
+"""Unit tests for the safety module -- no browser needed. Covers: the allowlist blocks an out-of-scope
+action, and the risk classifier correctly flags a commit-type action.
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 """The one test that makes a REAL Gemini API call against a REAL MockBank instance --
-ASSIGNMENT_ORIGINAL.md Section 4's non-negotiable: "the discovery run has to be real... a
-single successful run is not an expensive thing to produce." Skipped automatically without
-GEMINI_API_KEY, so `pytest` stays free of any external dependency or cost for anyone verifying
-the rest of the system (README's "what needs live services" table).
+the discovery run has to be real -- a mocked model proves nothing about whether discovery works.
+Skipped automatically without GEMINI_API_KEY, so `pytest` stays free of any external dependency
+or cost for anyone verifying the rest of the system.
 """
 from __future__ import annotations
 

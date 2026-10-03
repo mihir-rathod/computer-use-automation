@@ -1,196 +1,145 @@
-# Adaptation Write-up: MERIDIAN CORE
+# Design, incidents and limitations
 
-This covers adapting the take-home core (discover → typed capability artifact → deterministic
-replay, with safety/evidence/escalation) to MERIDIAN CORE (`web-sample.interface-hiring.com`),
-and wrapping it as a callable API, a chatbot, and a dashboard.
+This is a living document. Every claim below is backed by code in this repository or by a test,
+and anything not yet true is listed under [Limitations](#limitations) rather than implied.
 
-## What adapting actually took
+## The problem
 
-Recording all seven MERIDIAN capabilities (sign-on, balance inquiry, funds transfer, open
-share, update member, place hold, plus member inquiry folded into balance inquiry) needed **no
-schema or replay-engine rewrite**. The per-transaction hidden token the brief calls out rides
-along automatically through real browser form submission — a genuine live browser driving a
-real page doesn't need to "know" a token exists, any more than a human teller does. That's the
-adaptation-quality signal working as intended: MERIDIAN's review→post flow, and the
-supervisor-gated Place Hold, fell out of the existing `Step`/`ReplayEngine` shape unchanged.
+Web UIs that have no API (legacy back-office screens, vendor portals) are usually automated by
+hand-written scripts that break whenever the page changes, or by an LLM agent that drives the UI
+live on every run: slow, expensive, and non-deterministic. This project takes a middle path.
 
-Six small, targeted changes to the core were needed. Each is here because something concrete
-broke when this ran against MERIDIAN's real markup — not something anticipated in advance.
+- **Discovery.** An LLM drives the UI once, toward a stated goal, against the real page.
+- **Artifact.** The run is turned into a typed, parameterized, reviewable JSON artifact.
+- **Replay.** Every later run executes the artifact deterministically. The replay path imports
+  nothing from the LLM code (`replay/`, `surface/`, `safety/`, `escalation/` and `evidence_lib/`
+  have no import of `agent/` or any model SDK), so a replay cannot spend a token.
 
-1. **Unlabeled login fields.**
-   MERIDIAN's Operator ID and Password inputs have no accessible name and no `id` — the
-   attributes the locator strategy relied on. *Fix:* `compute_target()` gained a fallback that
-   locates by CSS `[name=...]` when those attributes are missing.
+The model is allowed in exactly two places: discovery, and (planned) a human-approved repair
+mode. Never in normal replay.
 
-2. **Risk classifier flagged a safe click as irreversible.**
-   MERIDIAN's routes bake the transaction type into the URL for the whole flow, not just the
-   final step — e.g. `/members/{id}/transfer` is the URL on both the entry page and the safe
-   review page. The classifier matched risk keywords against the URL as well as the description,
-   so it would have blocked the harmless "Continue" click on the review page, before a human ever
-   saw it. *Fix:* split the keyword list into two tiers — commit-verb keywords (`confirm`,
-   `post`, `delete`) still match against the URL, but domain-noun keywords (`transfer`,
-   `withdraw`, `hold`) now only match against the step's own description, never the URL.
+## Architecture
 
-3. **A real safety gap, caught by actually running it.**
-   The "Open Share" commit button matched neither keyword tier, so it wasn't flagged as
-   irreversible at all — a real $50 share opened live with zero confirmation prompt before I
-   caught it. *Fix:* added "open share" to the domain-noun list. Flagging this here as a genuine
-   incident that happened, not a hypothetical risk.
+```
+agent/      DiscoveryLoop  -> transcript -> recorder.py -> Artifact
+replay/     ReplayEngine   (artifact + typed inputs -> ReplayResult)
+surface/    Surface.perceive()/act()   one chokepoint, Playwright-backed
+safety/     allowlist + risk classifier, consulted inside Surface.act()
+escalation/ SessionManager (pause / take over / resume) + operator console
+runtime.py  run_replay(): the one path CLI, API and chatbot all call
+```
 
-4. **Extraction broke on a different member's data.**
-   The locators used to read values off the page baked in one specific record's structure, and
-   MERIDIAN's tables have no `<th>` header cells to anchor against — so an extractor that worked
-   during recording silently failed the moment it ran against a different member. *Fix:* switched
-   extraction to XPath-anchored locators instead of role/name locators.
+## Decisions and why
 
-5. **No way to say "succeeded, but only after a human stepped in."**
-   The original result schema only distinguished success / business outcome / hard failure — it
-   had no way to record that a run succeeded *after* escalation, which the API and dashboard both
-   need to report honestly. *Fix:* added `escalated` and `recovered` fields to `ReplayResult`, set
-   once, at the engine's single exit point.
+**The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
+extract. `agent/recorder.py` is deterministic: it assigns step ids, builds locator chains,
+replaces concrete values with `{{param}}` placeholders, synthesizes per-step checkpoints and tags
+risk. The contract (capability id, typed input and output, success signal, known error signals)
+is written by a human in `agent/catalog.py`; the model only works out *how*.
 
-6. **Almost hand-wrote the login capability instead of discovering it.**
-   Partway through, I started to hand-write `meridian.signon` the way a human might assume "just
-   script the login form" — until re-checking the brief's own §3.1 made clear login itself has to
-   go through the same discovery flow as everything else, since you can't discover how to use the
-   other capabilities before you can log in to see them. *Fix:* a one-line special case so
-   discovery runs for sign-on first, before any other capability.
+**Perception is an accessibility tree, not pixels.** The loop is handed a numbered element list
+(role, accessible name, value). It is cheaper and more stable than screenshots, and it is the
+same vocabulary replay later resolves locators against. Screenshots are captured as evidence only.
 
-## The capability API
+**One locator mechanism.** A `Target` is an ordered fallback chain (role+name, then CSS, then
+XPath, then text). The same shape is used to act and to check. The resolver treats an ambiguous
+match as no match rather than guessing, so a locator that hits two elements falls through to the
+next strategy instead of clicking the wrong one.
 
-**One process, three routers.** The capability API, the chatbot, and the dashboard are separate
-FastAPI routers on the same app — deliberate, not default. Every invocation is one synchronous
-replay against one external target; nothing here needs independent scaling or a queue.
+**One `Signal` shape, three purposes.** The same structure answers "did this step work" (step
+checkpoint), "was the goal reached" (artifact success checkpoint) and "does this page match a
+known condition" (error rules).
 
-**A real concurrency bug, found by running it, not by review.** Like any web server, the API can
-serve multiple separate, unrelated requests in parallel — different callers hitting it at the
-same time, not one request chaining into several capability calls. It does that by pulling
-workers from a shared pool and returning them when each request is done. Browser automation has
-one rule: whichever worker opens a browser session has to be the one that closes it — you
-can't hand it off mid-session. A demo run deliberately leaves the browser window open so it can
-actually be watched, skipping that cleanup on purpose — and if that worker went back into the
-shared pool afterward, the next, completely unrelated request could get handed that same
-half-cleaned-up worker and break for no reason of its own. *Fix:* every replay now gets its own
-private, one-time-use worker instead of borrowing from the shared pool, so even when a demo run
-leaves a mess behind, that worker just gets thrown away rather than handed to anyone else.
+**Three-way result.** Replay returns `success`, `business_outcome` or `hard_failure`. A page that
+says "no such member" is a correct answer, not an error, so collapsing it into either side is
+the classic mistake. Classification order is business outcome, then recoverable condition, then
+hard failure, and it runs after every action, not only on checkpoint failure, because a weak
+checkpoint can pass on a broken page.
 
-**Two endpoints.**
-- `GET /capabilities` — the catalog, read straight from what's already on disk under
-  `/artifacts/`: capability_id, typed input/output JSON Schema, safety metadata. No separate
-  registry to keep in sync.
-- `POST /capabilities/{id}/invoke` — takes typed `params` plus `target` (`mockbank` or
-  `meridian`), returns a structured result: `status` (`success` / `business_outcome` /
-  `hard_failure`), `outputs`, `business_outcome`, `error`, `escalated`, `recovered`,
-  `evidence_dir`.
+**Safety is a chokepoint, not a convention.** `Surface.act()` consults the allowlist and the risk
+classifier for every action from both discovery and replay. The classifier re-classifies live and
+does not trust the `risk_level` an artifact claims, so a stale or hand-edited artifact cannot
+downgrade a step. An irreversible action is blocked unless a human confirms it.
 
-**Same execution path as the CLI.** Every invocation runs through `runtime.run_replay()` — the
-exact function `cli.py replay` itself calls. The API can never become a second implementation of
-"how do I run a capability" — structurally, not by convention.
+**Escalation acts on the same live session.** The automation thread owns the Playwright page.
+The operator console runs on another thread and may only enqueue intents; the automation thread
+drains them inside `pause()`, because Playwright's sync API is not safe across threads. A step
+escalates at most once. On resume the engine checks the step's checkpoint before redoing the
+action, so a human who already performed it is not double-submitted.
 
-**HTTP status means "was the call well-formed," not "did it succeed."** 404/422 are reserved for
-problems with the request itself (unknown capability, unknown target, bad body). A business
-outcome — or even a hard failure — is still a *successful* API call: 200, with the outcome in the
-response body, matching the brief's own three-way result contract instead of collapsing it into
-HTTP status codes.
+**One execution path.** The CLI, the HTTP API and the chatbot all call `runtime.run_replay()`.
+None of them reimplements it, so none of them can skip safety, evidence or escalation.
 
-## Locators on a legacy UI
+## Incidents
 
-Same stack as the take-home: Playwright, an accessibility-tree-driven `WebSurface`, no
-coordinates, no model in the replay decision loop — the LLM only runs at discovery time, never
-during replay.
+Things that broke when the system met reality, and what changed.
 
-MERIDIAN's HTML doesn't give the automation clean things to grab onto: some form fields have no
-label at all, and its tables have no header cells to anchor a "read this column" locator against.
-Concretely, that's the same fallback-locator and XPath-extraction fixes already listed under
-"what adapting took" (items 1 and 4) — this is just the "why this category of bug kept showing
-up" framing. Found the way most of these were found: by running discovery live, then watching
-replay silently fail against a *different* member's data than the one it was recorded on — the
-exact failure mode a UI with no stable identifiers produces.
+1. **A commit button slipped past the risk classifier.** During unsupervised discovery against an
+   external legacy app, a button whose label carried none of the classifier's keywords committed
+   a real, irreversible action with no confirmation. This is why keyword matching is documented
+   as a limitation, why risk is also declared per capability, and why the planned fix is policy
+   configuration rather than a bigger word list. (Earlier milestone; not part of this branch.)
+2. **Playwright state leaked across pooled threads.** Running a replay on a shared API worker
+   thread left that thread's Playwright event-loop state dangling, which broke the next unrelated
+   request on the same thread. Each run now gets its own throwaway thread.
+3. **A parameter value corrupted an artifact.** The recorder replaces concrete values with
+   placeholders by substring match, so a value that was a literal substring of another recorded
+   string rewrote the wrong text. It was fixed by hand in the one affected artifact; the
+   substring approach itself is still in `agent/recorder.py` and is on the fix list.
+4. **The chatbot silently substituted a different capability.** Given an incomplete request, the
+   model picked a capability it could fully satisfy instead of asking what was missing. Three
+   prompt rewrites failed to stop it, and one made it invent placeholder values. A code-level
+   keyword guard now declines instead. It is a stopgap, not a solution.
+5. **A discovered artifact had no starting step.** Replayed from a different page, it failed at
+   step one. Discovery now records an explicit navigation to `start_path` first.
+6. **Wrong values looked like hangs.** Playwright's 30s default made a stale locator value look
+   like a frozen run. The default action timeout is 8s.
 
-## Handling the six injected fault conditions
+## Evidence for each claim
 
-The brief lets six fake error states be injected into MERIDIAN (`?inject=notfound`, etc.) to
-prove the system handles failures gracefully, not just the happy path. Each one gets sorted into
-one of the three outcome types the take-home's engine already understands:
+| Claim | Backed by |
+|---|---|
+| Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
+| Core behavior | 96 offline tests (schema, replay engine, safety, session manager, operator console, API, dashboard, web surface) |
+| LLM discovery works end to end | `tests/test_discovery_live.py` (skips without `GEMINI_API_KEY`) |
+| Measured success and recovery rates | **Not yet measured.** A benchmark harness is planned. |
 
-| Injected condition | Sorted as | Recognized by |
-|---|---|---|
-| `notfound` | expected result, not an error (`not_found`) | "RECORD NOT FOUND" *or* the natural "No member records matched your search." |
-| `validation` | expected result, not an error (`validation_error`) | "TRANSACTION REJECTED" *or* the natural "The transaction could not be validated:" |
-| `permission` | expected result, not an error (`permission_denied`) | a teller attempting a supervisor-only action |
-| `timeout` | recoverable — the system logs back in and continues on its own | session destroyed, redirected to sign-on |
-| `maintenance` | recoverable — the system retries the same click | the interstitial's own "Continue" link goes to `/menu`, not back to the original page, so a same-page resume would land somewhere wrong |
-| `server` | hard failure, no retry attempted | matches the real site itself: its error page offers no continue/retry link at all, so pretending one exists would be a fake affordance |
+## Limitations
 
-This taxonomy is backed by real automated tests (`tests/test_meridian_guarantees.py`), which
-drive one business-outcome run and one recoverable-condition run through the live API against
-the real site — not just asserted in this write-up. Two things worth knowing, found only by
-actually testing this, not by reading the brief:
+These are verified against the code as of this writing.
 
-- **The fake and the real version of the same error don't say the same thing.** `notfound` and
-  `validation` render different text depending on whether you triggered them via `?inject=` or
-  a real search miss / real bad input. Both texts had to be recognized as the same outcome, or
-  testing only the fake version would've missed real users hitting the same case.
-- **The `maintenance` test can't actually prove a recovery happened.** MERIDIAN's
-  `?inject=maintenance` switch is permanent once set on a URL — it never turns itself off, even
-  after reloading. So the test can only prove the retry logic fires and gives up cleanly after
-  its retry limit, not that it ever gets past the fault. Said plainly here rather than leaving the
-  test's real limit implicit.
+- **Irreversible steps are hand-authored.** Discovery stops at the confirmation gate, so the
+  final commit step of a state-changing artifact is written by hand. Some artifacts are
+  `reviewed: false`.
+- **No stability waits.** Replay relies on Playwright's auto-waiting and an 8s action timeout.
+  There is no DOM-stability or network-idle wait, no whole-run timeout, and cancellation only
+  works while paused.
+- **Retries are not fully idempotent-safe.** `Step.idempotent` prevents an automatic restart
+  after re-login once a commit step ran, but a `RETRY` recovery rule re-runs the step blindly,
+  and there are no idempotency keys or server-side ground truth to confirm "exactly once".
+- **Safety rules live in code.** The risk classifier is a keyword list. There are no per-capability
+  limits, dry-run mode or approver identity.
+- **Redaction is narrow.** Only password-like fields are redacted; evidence otherwise contains
+  whatever the page shows.
+- **No locator healing and no versioning.** A UI change fails the artifact. Storage keeps one
+  file per capability, overwritten on each discovery, with no history or rollback.
+- **Synchronous, in-memory runtime.** `/invoke` blocks until the run finishes. Sessions, chat
+  history and settings are process-global memory, and run history is rebuilt by scanning the
+  evidence directory. Nothing survives a restart.
+- **The API is unauthenticated** and accepts `evidence_dir`, `base_url` and credentials from the
+  request body. It is for local use only. The operator console also starts at import time on a
+  fixed port.
+- **One browser per run.** Each run launches Chromium and logs in again. Headed runs deliberately
+  leave the browser open.
+- **The chatbot is minimal.** Gemini only, no conversation memory, one capability per message,
+  a hand-maintained keyword guard, and a server-rendered page that polls.
+- **One test target.** The offline suite only exercises the bundled MockBank app, so results
+  say little yet about generalization to other apps.
 
-## How safety, evidence, and escalation survive the new path
+## What is next
 
-**Safety.** A per-target allowlist (`safety/allowlist_meridian.json`) plus the risk-classifier
-fix described above.
-
-**Evidence.** Unchanged in shape — JSONL log, screenshots — plus one addition: a `run_start`
-event, logged the moment a run's evidence directory exists, so a run that crashes or hangs
-before any terminal event still shows up identified on the dashboard instead of blank.
-
-**Escalation** is the guarantee I checked most carefully, since it's the one a new wrapper could
-most easily quietly break. Verified live through *every* surface, not just asserted: a real
-MERIDIAN transfer paused and was approved through the operator console via the CLI, the raw API,
-and the chatbot — whose chat bubble now shows live "paused, needs a human" state instead of a
-frozen page while it waits — plus an automated test exercising the same path with no human at
-the keyboard. All four report a real confirmation number on completion, and the `escalated` flag
-distinguishes "a human stepped in" from plain success at every layer.
-
-**Redaction** got a deliberate, written decision rather than silent scope-widening: kept to
-secrets only (passwords/tokens/credentials), documented directly in
-`evidence_lib/redaction.py`'s own docstring. Everything MERIDIAN's evidence captures — balances,
-confirmation numbers, member names — is synthetic seed data on an eval sandbox, and it's also
-exactly what the evidence/dashboard system exists to show. Redacting it would satisfy the letter
-of "handle regulated financial data" while gutting the system's actual debugging purpose. A real
-deployment handling genuinely regulated data would encrypt/access-restrict the evidence store,
-not blank out its own operational output.
-
-## What was cut, and what's next
-
-- **No automatic window management for headed demo runs.** A headed browser now stays open
-  after its run finishes (previously closed instantly, defeating the point of `--slow-mo`), but
-  auto-closing the *previous* window on a new one was attempted and reverted — it hit a real
-  Playwright constraint (a browser connection can only be closed from the exact thread that
-  created it, still alive). Not worth the added complexity this close to demo day; closing
-  windows manually between runs is a small, acceptable step.
-- **The chatbot maps one message to one capability call, on purpose.** A compound request
-  ("check the balance, then transfer $5") silently only does the first part today. Sequential
-  chaining was considered and deferred — the real complexity is what a chained request should do
-  when the *first* step pauses for escalation, not the happy path.
-- **Caching would help the chatbot for a real reason: Gemini quota, not latency.** Every chat
-  message costs one Gemini call just to decide which capability to run, and this project hit a
-  real free-tier quota limit mid-build -- one Gemini model alias capped at 20 requests/day, which
-  is what actually forced the switch to the current `DEFAULT_MODEL`. The safe thing to cache is
-  the *decision* ("which capability, which args"), keyed
-  on the literal message text -- never the capability's *result*. Caching a balance or a transfer
-  outcome would mean showing stale money data, which is the one thing a banking flow can't afford
-  to get wrong; caching only the routing decision means every capability call still hits MERIDIAN
-  for real, every time.
-- **Automated MERIDIAN coverage is representative, not exhaustive** — one business-outcome run,
-  one recoverable-condition run, one escalation, through the API, not every capability × every
-  condition. Next: extend the same pattern to the remaining capabilities.
-- **`pytest` runs against the live fixtures leave real `evidence/` directories behind.** The live
-  tests deliberately call the same `run_replay()`/discovery code real demo runs use, so they
-  write into the repo's real `/evidence/` folder too -- 31 directories there right now, cleaned
-  up by hand this sprint. Next: a fixture that redirects `EVIDENCE_ROOT` to `tmp_path` for
-  test-triggered runs.
-- **The dashboard is read-only with no access control** — fine for a demo, not for production
-  data even under the "keep it visible" redaction decision above; would need real auth first.
+A self-hosted target app with an audit-log API as ground truth, fault and drift injection, and a
+reset endpoint; supervised capture of irreversible steps; locator repair proposals that a human
+approves; replay stability waits and idempotency; async, persisted runs with API auth; one
+unified UI; and a benchmark that reports success rate, recovery rate and discovery cost against
+zero-token replay. None of these are claimed until they are built and measured.

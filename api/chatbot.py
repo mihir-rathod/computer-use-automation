@@ -1,16 +1,14 @@
-"""The chatbot -- ASSIGNMENT_ORIGINAL.md 3.3: "a minimal conversational front door... that
-turns a user request into the right capability invocation(s), calls your API, and clearly
-confirms success or reports the error/escalation in plain language, surfacing the structured
-result." Kept thin, per the brief's own instruction: no conversation memory across turns (each
-message is a fresh, self-contained request to the model), and the result is rendered by a plain
-template, not a second LLM call.
+"""The chatbot -- a conversational front door that turns a user request into the right
+capability invocation, calls the capability API, and confirms success or reports the
+error/escalation in plain language, surfacing the structured result. Currently kept thin on
+purpose: no conversation memory across turns (each message is a fresh, self-contained request to
+the model), and the result is rendered by a plain template, not a second LLM call.
 
 Mechanically: one Gemini FunctionDeclaration per capability, generated straight from its own
 input_schema -- the same JSON-Schema shape agent/tools.py already hand-builds for the discovery
 tool set, generated here instead of hardcoded, which is exactly the payoff of input_schema being
-JSON-Schema-shaped in the first place (artifacts_lib/schema.py's own docstring calls this out as
-"relevant for the agent-facing capability interface stretch goal" -- this is that). Gemini picks
-a capability + typed args from the message; the chosen capability is invoked over real HTTP
+JSON-Schema-shaped in the first place (artifacts_lib/schema.py's own comments call this out).
+Gemini picks a capability + typed args from the message; the chosen capability is invoked over real HTTP
 against this app's own /capabilities/{id}/invoke -- the chatbot is just another client of the
 capability API, not a shortcut around it.
 
@@ -60,9 +58,9 @@ def _operator_console_url() -> str:
 _JSON_TO_GEMINI_TYPE = {"string": "STRING", "number": "NUMBER", "integer": "INTEGER", "boolean": "BOOLEAN"}
 
 SYSTEM_INSTRUCTION = (
-    "You are a teller-facing assistant for two banking back-office systems: MockBank and "
-    "MERIDIAN CORE. Each available tool is one real, callable capability against one of those "
-    "systems -- call exactly one tool that matches what the user is asking for, with the exact "
+    "You are an operator-facing assistant for a banking back-office system. Each available "
+    "tool is one real, callable capability against it -- call exactly one tool that matches what "
+    "the user is asking for, with the exact "
     "argument values they gave (or that are obviously and unambiguously implied). If the "
     "request doesn't match any available capability, or is missing required information, don't "
     "call a tool -- reply in plain text asking for what's missing or explaining it's out of "
@@ -116,23 +114,19 @@ def _build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
     return [types.Tool(function_declarations=declarations)], by_function_name
 
 
-# Found by actually testing the chatbot with an incomplete request ("update the email of
-# member 100987" -- no phone/address), not designed defensively up front: when a capability's
-# required args aren't all present in the message, Gemini doesn't reliably follow
-# SYSTEM_INSTRUCTION's "ask for what's missing" -- it silently substitutes a *different*
-# capability it CAN fully satisfy (balance_inquiry, needing only member_id) instead of
-# declining. Three system-prompt rewrites failed to stop this reliably; one variant "fixed" the
+# Found by actually testing the chatbot with incomplete requests, not designed defensively up
+# front: when a capability's required args aren't all present in the message, Gemini doesn't
+# reliably follow SYSTEM_INSTRUCTION's "ask for what's missing" -- it silently substitutes a
+# *different* capability it CAN fully satisfy (one needing fewer args) instead of declining.
+# Three system-prompt rewrites failed to stop this reliably; one variant "fixed" the
 # substitution but then fabricated placeholder values for the missing fields instead, which is
-# worse (that's fake data that would actually reach MERIDIAN). This is a code-level guardrail
+# worse (fake data that would actually reach the target system). This is a code-level guardrail
 # instead: does the message contain at least one word actually characteristic of the capability
 # Gemini picked? If not, the pick is almost certainly wrong -- decline rather than invoke.
+# A hand-maintained keyword table is a stopgap, not the end state: it should be replaced by
+# schema-level validation of the chosen arguments.
 _CAPABILITY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "meridian.balance_inquiry": ("balance", "look up", "lookup"),
     "mockbank.member_balance_lookup": ("balance", "look up", "lookup"),
-    "meridian.update_member": ("update", "contact", "email", "phone", "address", "change the"),
-    "meridian.funds_transfer": ("transfer",),
-    "meridian.open_share": ("open a", "open new", "new share", "open share"),
-    "meridian.place_hold": ("hold",),
     "mockbank.open_subaccount": ("open", "sub-account", "subaccount", "new account"),
 }
 
@@ -170,12 +164,12 @@ def _invoke(capability_id: str, args: dict[str, Any], target: str, evidence_dir:
 
 def _render_result(capability_id: str, result: dict[str, Any]) -> str:
     """Plain-language rendering of a structured invoke response -- a template, not a second LLM
-    call, per the brief's "keep it thin" instruction. Always surfaces the real structured
-    values (confirmation numbers, balances, the actual error), never just a vague "done".
+    call. Always surfaces the real structured values (confirmation numbers, balances, the
+    actual error), never just a vague "done".
 
-    ASSIGNMENT_ORIGINAL.md 3.3 asks the chatbot to "report the escalation in plain language" as
-    a distinct outcome, not just success/business_outcome/error -- a run a human had to approve
-    via the operator console reads identically to an unescalated run unless called out here."""
+    Escalation is reported as a distinct outcome, not just success/business_outcome/error -- a
+    run a human had to approve via the operator console would otherwise read identically to an
+    unescalated run."""
     status = result["status"]
     outputs = result.get("outputs") or {}
     # One field per line, not comma-joined -- the chat bubble is white-space:pre-wrap, so this

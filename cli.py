@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""CLI entry point. See README.md's "Demo path" for the exact commands this implements.
+"""CLI entry point. See README.md for usage; these are the commands it implements.
 
     uv run python cli.py discover --capability mockbank.member_balance_lookup --param member_id=10001
     uv run python cli.py replay    --capability mockbank.member_balance_lookup --param member_id=10002
@@ -11,8 +11,8 @@ artifact or result -- to /evidence/<run>/ by default.
 
 `replay` is a thin wrapper over runtime.run_replay() -- the same function the capability API
 (api/app.py) calls -- so the CLI and the API can never diverge on how a capability actually
-runs. `discover` stays CLI-only: the brief's capability API is specifically about invoking
-already-recorded capabilities (3.2), not about running discovery.
+runs. `discover` stays CLI-only: the capability API is specifically about invoking
+already-recorded capabilities, not about running discovery.
 """
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     evidence_dir = Path(args.evidence_dir) if args.evidence_dir else EVIDENCE_ROOT / runtime.run_id("discovery_run")
     logger = EvidenceLogger(evidence_dir)
     # Logged as soon as the evidence dir exists, before anything can go wrong -- the dashboard
-    # (Phase 5) needs to identify what a run *is* (capability, goal, target) even for a run that
+    # needs to identify what a run *is* (capability, goal, target) even for a run that
     # crashes or hangs before ever reaching a terminal "discovery_result" event.
     logger.log("system", "run_start", kind="discovery", capability_id=spec.capability_id, goal=spec.goal, target=args.target)
     safety_policy = runtime.build_safety_policy(target["base_url"], target["allowlist"])

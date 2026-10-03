@@ -1,7 +1,7 @@
 """MockBank -- a small, deliberately legacy-flavored bank back-office app.
 
-Stands in for a real core-banking/servicing screen per ASSIGNMENT_ORIGINAL.md Section 4
-("target application... pick a proxy that exercises a non-trivial multi-step flow").
+Stands in for a real core-banking/servicing screen: a proxy target that exercises a
+non-trivial multi-step flow.
 Server-rendered Jinja2, nested-table layout, no data-testid attributes -- but real <label>/
 <table><th> semantics, so the accessibility tree still carries meaningful roles and names
 even though the raw markup is ugly. That gap (ugly DOM, meaningful a11y tree) is the point.

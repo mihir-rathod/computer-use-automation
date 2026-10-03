@@ -1,7 +1,7 @@
 [project]
-name = "interface-ai-computer-use"
+name = "computer-use-automation-system"
 version = "0.1.0"
-description = "Computer-use automation system: LLM-driven discovery, artifact recording, deterministic replay, and human escalation against a mock legacy bank app."
+description = "Computer-use automation system: LLM-driven discovery, artifact recording, deterministic replay, and human escalation against a legacy-style bank app."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

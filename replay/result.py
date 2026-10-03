@@ -1,7 +1,7 @@
-"""The replay result contract -- ASSIGNMENT_ORIGINAL.md 3.3: "Report a clear, structured
-result: success (with outputs), a known business outcome, or a failure with enough detail to
-debug." Three distinct statuses, not two -- collapsing business_outcome into either success or
-failure is "the most common design mistake here" per the brief's own glossary.
+"""The replay result contract: a clear, structured result -- success (with outputs), a known
+business outcome, or a failure with enough detail to debug. Three distinct statuses, not two --
+collapsing business_outcome into either success or failure is the most common design mistake
+in this kind of system.
 """
 from __future__ import annotations
 

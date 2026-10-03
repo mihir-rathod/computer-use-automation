@@ -1,7 +1,7 @@
-"""The Surface interface -- ASSIGNMENT_ORIGINAL.md 3.7's seam between "how we perceive/act
-on a surface" and "the recorded flow". WebSurface (surface/web.py, Playwright) is the only
-implementation built here; LegacyWebSurface and DesktopSurface are a design extension
-documented in REPORT.md heading 4, not built, but this is the interface they'd implement.
+"""The Surface interface -- the seam between "how we perceive/act on a surface" and "the
+recorded flow". WebSurface (surface/web.py, Playwright) is the only implementation built here;
+LegacyWebSurface and DesktopSurface would be a design extension, not built, but this is the
+interface they'd implement.
 
 Both the discovery agent and the replay engine drive a Surface through the same two calls
 (perceive/act) and the same Action/ActionResult shapes -- there is no separate "replay mode"

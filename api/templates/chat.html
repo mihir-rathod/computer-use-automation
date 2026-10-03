@@ -54,7 +54,7 @@
   <a class="active" href="/chat">Chatbot</a>
 </nav>
 <h1>Capability Chatbot</h1>
-<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for meridian member 100987"</em> or <em>"transfer $5 from 100987-S0001 to 100987-MMKT-5 for member 100987"</em>.</p>
+<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for member 10001"</em> or <em>"open a savings sub-account for member 10001 with a $50 deposit"</em>.</p>
 <p class="meta">If a request needs a human (an irreversible action, or something that got stuck), it pauses here -- keep the <a href="{{ operator_console_url }}" target="_blank" rel="noopener">operator console</a> open in another tab to catch it.</p>
 
 <details class="fields">
@@ -91,7 +91,7 @@
     <span class="hint">Show browser pops a real, separate window driving the actual site.</span>
   </div>
   <div class="send-row">
-    <input type="text" id="msg-input" name="message" placeholder="e.g. look up meridian member 100234's balance" required autofocus>
+    <input type="text" id="msg-input" name="message" placeholder="e.g. look up member 10001's balance" required autofocus>
     <button type="submit">Send</button>
   </div>
 </form>

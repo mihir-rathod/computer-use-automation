@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 
 # Dummy operator credential for this mock app only -- not a real secret, never used
-# against a real system. See ASSIGNMENT_ORIGINAL.md ground rules: "never use real credentials".
+# against a real system. Never use real credentials in a fixture.
 MOCK_USERNAME = "operator"
 MOCK_PASSWORD = "bankdemo123"
 

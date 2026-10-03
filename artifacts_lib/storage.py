@@ -2,8 +2,8 @@
 
 One file per capability, named by capability_id -- discovery (agent/) writes here after a
 successful run, and replay (replay/) reads from here. Deliberately just a directory of
-files, not a database: matches Section 7's "we don't reward... building scaling
-infrastructure" and there's no query pattern here more complex than "look up by id".
+files, not a database: there's no query pattern here more complex than "look up by id".
+(Versioning and run persistence are the point at which this stops being enough.)
 """
 from __future__ import annotations
 

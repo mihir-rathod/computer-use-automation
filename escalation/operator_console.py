@@ -1,7 +1,5 @@
-"""A bare/mock operator console -- ASSIGNMENT_ORIGINAL.md 3.6 explicitly scopes this down:
-"a full real-time co-browsing operator console is out of scope... Mock the operator UI if
-needed, but make the handoff mechanism and the control-transfer model real." This is that:
-plain server-rendered HTML, auto-refreshing while paused, no websockets/co-browsing -- but it
+"""A bare operator console: plain server-rendered HTML, auto-refreshing while paused, no
+websockets/co-browsing -- but the handoff mechanism and control-transfer model are real: it
 genuinely acts on the SAME live session the automation was using (via
 SessionManager.request_action -> the automation thread's own pause() loop), not a fresh one.
 """
@@ -24,7 +22,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 @app.get("/operator", response_class=HTMLResponse)
 async def operator_index(request: Request):
-    """The one predictable entry point -- ASSIGNMENT_ORIGINAL.md 3.3/3.6: once the chatbot (not
+    """The one predictable entry point: once the chatbot (not
     just the CLI, which prints each run's id to its own terminal) is what's starting runs, a
     person watching the chat page has no way to learn a specific run's id while it's paused.
     This lists whatever's currently registered so they can land on the right session without

@@ -1,5 +1,0 @@
-{
-  "allowed_base_urls": ["https://web-sample.interface-hiring.com"],
-  "allowed_route_patterns": ["/signon", "/menu", "/members", "/members/*", "/settings", "/signoff"],
-  "allowed_action_types": ["navigate", "click", "type", "select", "extract", "wait_for", "dismiss_dialog"]
-}

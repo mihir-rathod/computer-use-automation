@@ -1,5 +1,5 @@
-"""Tests for the dashboard (api/dashboard.py) -- ASSIGNMENT_ORIGINAL.md 3.4's "lightweight UI to
-watch the system work". No new persistence to test against: a real /invoke call against the
+"""Tests for the dashboard (api/dashboard.py) -- a lightweight UI to
+watch the system work. No new persistence to test against: a real /invoke call against the
 in-process MockBank fixture writes real evidence to disk, and these tests check the dashboard
 reads that evidence back correctly -- catalog, run history, and one run's own detail page.
 """

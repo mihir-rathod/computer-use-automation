@@ -47,4 +47,4 @@ def test_chatbot_reports_a_business_outcome_not_an_error(monkeypatch, api_base_u
 
 def test_chatbot_declines_an_out_of_scope_request_without_forcing_a_tool_call(monkeypatch, api_base_url, mockbank_base_url):
     reply = _send("what's the weather like today", monkeypatch, api_base_url, mockbank_base_url)
-    assert "mockbank." not in reply and "meridian." not in reply
+    assert "mockbank." not in reply

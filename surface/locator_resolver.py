@@ -1,5 +1,5 @@
 """Resolves an artifact's Target (an ordered locator fallback chain) against a live Playwright
-page -- the concrete mechanism behind "stable element targeting" (ASSIGNMENT_ORIGINAL.md 3.3).
+page -- the concrete mechanism behind "stable element targeting".
 Used by replay directly, and by WebSurface.act() when a discovery-era ref isn't available.
 """
 from __future__ import annotations

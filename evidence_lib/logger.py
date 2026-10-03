@@ -1,7 +1,6 @@
-"""Structured JSONL evidence log -- ASSIGNMENT_ORIGINAL.md 3.5: "a structured log of what the
-agent did and why". One file per run. Surface.act() is the single chokepoint that writes here
-(see surface/web.py), so evidence is a byproduct of every later phase running the system, not
-something bolted on separately before generating /evidence/ (Phase 10).
+"""Structured JSONL evidence log -- a record of what the agent did and why. One file per run.
+Surface.act() is the single chokepoint that writes here (see surface/web.py), so evidence is a
+byproduct of running the system, not something bolted on separately.
 """
 from __future__ import annotations
 

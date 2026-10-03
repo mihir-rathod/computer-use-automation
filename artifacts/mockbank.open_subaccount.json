@@ -180,6 +180,6 @@
     "discovery_run_id": "phase10-open-subaccount",
     "created_at": "2026-08-15T00:00:00Z",
     "reviewed": true,
-    "note": "Hand-written, not LLM-discovered -- the brief requires at least one genuine LLM-driven discovery run, already satisfied by mockbank.member_balance_lookup. This capability exists specifically to exercise validation_error (Section 3.3) and an irreversible, confirmation-gated step (Section 3.4) at full artifact/replay granularity, which member_balance_lookup (read-only) cannot."
+    "note": "Hand-written, not LLM-discovered -- a genuine LLM-driven discovery run is already covered by mockbank.member_balance_lookup. This capability exists specifically to exercise validation_error and an irreversible, confirmation-gated step at full artifact/replay granularity, which member_balance_lookup (read-only) cannot."
   }
 }

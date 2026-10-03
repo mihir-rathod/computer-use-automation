@@ -1,6 +1,6 @@
 """Schema validation tests for the capability artifact model.
 
-Covers the two things Section 8 step 3 flags as worth testing early: the hand-written
+Covers the two things worth testing early: the hand-written
 fixture parses and round-trips through JSON, and the validators that make "typed
 inputs/outputs" and "reviewable" real constraints rather than aspirational ones.
 """

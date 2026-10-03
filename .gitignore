@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Run output and OS cruft
+evidence/
+.DS_Store

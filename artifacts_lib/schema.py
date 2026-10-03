@@ -2,10 +2,9 @@
 
 An artifact is what a successful discovery run (agent/) produces and what the replay
 engine (replay/) executes without an LLM in the loop. It is the seam between "the model
-figured this out once" and "this now runs deterministically, cheaply, on demand" --
-ASSIGNMENT_ORIGINAL.md Section 2's through-line.
+figured this out once" and "this now runs deterministically, cheaply, on demand".
 
-Design principles (see REPORT.md heading 2 for the full rationale):
+Design principles:
 - `Locator` fallback chains are the one mechanism used everywhere a concrete element needs
   to be found -- both for acting (Step.target) and for checking (Signal.target). Nothing
   else in this schema invents a second way to point at an element.
@@ -43,7 +42,7 @@ class Locator(BaseModel):
     note: str | None = Field(
         default=None,
         description="Why this locator was chosen / how robust it is expected to be -- "
-                     "the 'reasoning about robustness' ASSIGNMENT_ORIGINAL.md 3.2 asks for.",
+                     "the reasoning about robustness.",
     )
 
 
@@ -52,7 +51,7 @@ class Target(BaseModel):
 
     Replay tries locators[0] first; if it fails to resolve, it tries locators[1], etc.
     This -- not any single selector -- is the concrete mechanism behind "stable element
-    targeting" (3.3).
+    targeting".
     """
     semantic_description: str
     locators: list[Locator]
@@ -121,8 +120,8 @@ _TARGET_REQUIRED_ACTIONS = {ActionType.CLICK, ActionType.TYPE, ActionType.SELECT
 
 
 class StepRiskLevel(str, Enum):
-    """Binary by design -- ASSIGNMENT_ORIGINAL.md 3.4 asks to distinguish safe/reversible
-    from risky/irreversible, not to build a finer-grained taxonomy."""
+    """Binary by design -- the job is to distinguish safe/reversible from risky/irreversible,
+    not to build a finer-grained taxonomy."""
     SAFE = "safe"
     IRREVERSIBLE = "irreversible"
 
@@ -183,7 +182,7 @@ class CapabilityTarget(BaseModel):
     tenant_id: str | None = Field(
         default=None,
         description="Null for a base/reference capability. Set when a capability has been "
-                     "specialized for one tenant -- see REPORT.md heading 4.",
+                     "specialized for one tenant.",
     )
 
 
@@ -200,8 +199,7 @@ class Preconditions(BaseModel):
 # Typed input/output -- a minimal JSON-Schema-shaped object, not a full JSON Schema
 # implementation. Deliberately compatible with how LLM tool-calling APIs (Anthropic/
 # Gemini/OpenAI) already describe function parameters, so a capability's input_schema
-# can be handed to a tool-calling model directly -- relevant for the "agent-facing
-# capability interface" stretch goal.
+# can be handed to a tool-calling model directly (the chatbot does exactly this).
 # --------------------------------------------------------------------------------------
 
 class JSONSchemaObject(BaseModel):

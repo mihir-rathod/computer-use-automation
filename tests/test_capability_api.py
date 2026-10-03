@@ -1,4 +1,4 @@
-"""Tests for the capability API (api/app.py) -- ASSIGNMENT_ORIGINAL.md 3.2's "callable catalog".
+"""Tests for the capability API (api/app.py) -- the callable catalog.
 /invoke drives a real Playwright browser against the in-process MockBank fixture (same pattern
 as tests/test_web_surface.py), through the exact same runtime.run_replay() the CLI uses -- these
 tests are the automated proof that the API isn't a second implementation of "how do I run a

@@ -1,5 +1,5 @@
 """Parses Playwright's `locator.aria_snapshot(mode="ai")` output into a flat, filtered list
-of ObservedElement -- the LLM-facing "structured element list" PROJECT_PLAN.md 1.3 describes.
+of ObservedElement -- the LLM-facing "structured element list".
 
 That snapshot is a YAML-ish dump of the accessibility tree with `[ref=eN]` element references
 baked in (`page.locator("aria-ref=eN")` resolves one back to a live element). Two things this

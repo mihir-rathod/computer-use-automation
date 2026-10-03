@@ -1,30 +1,26 @@
-"""The floor for ASSIGNMENT_ORIGINAL.md 3.4 ("never persist secrets... into artifacts or
-logs"): the one real secret this system ever handles is the operator password typed during a
-login capability, so redact it at the one call site that has the context to recognize it.
+"""Redaction floor: never persist secrets into artifacts or logs. The one real secret this
+system handles today is the operator password typed during a login capability, so it is
+redacted at the one call site that has the context to recognize it.
 
-This is deliberately narrow, not a generic recursive redactor -- and after actually weighing it
-against the MERIDIAN adaptation's own eval criteria ("redaction of regulated financial data"),
-deliberately stays narrow rather than growing into a broader PII/financial-value redactor:
+This is deliberately narrow, not a generic recursive redactor:
 
-- Everything MERIDIAN's evidence captures (balances, confirmation numbers, share IDs, member
-  names) is synthetic seed data on a sandbox built for this evaluation -- there is no real
-  regulatory exposure here to mitigate, unlike a live production credit-union system.
-- Those exact values are what this system's evidence/dashboard exists to show. The brief's own
-  "structured result," "each run's inputs and structured outputs," and screenshots-as-evidence
-  all depend on them being visible -- redacting balances or confirmation numbers out of the
-  evidence would gut the system's stated debugging purpose, not just add friction to it.
-- Screenshots specifically aren't practically redactable without page-specific region
-  configuration per capability (there's no generic way to know where sensitive text renders on
-  an arbitrary legacy teller-console screen) -- fragile and disproportionate for a demo-scale
-  system, and would remove exactly the visual proof a reviewer inspects.
-- In a real deployment handling genuinely regulated data, the correct control is encrypting/
-  access-restricting the evidence store itself, not blanking the system's own operational
-  output -- redaction is the right tool for secrets that are never needed downstream (a
-  password), not for the business data the system exists to report.
+- The business data a capability reads or writes (balances, confirmation numbers, member names)
+  is exactly what this system's evidence and dashboard exist to show. Redacting it would gut
+  their debugging purpose, not just add friction to it.
+- Screenshots aren't practically redactable without page-specific region configuration per
+  capability -- there's no generic way to know where sensitive text renders on an arbitrary
+  screen.
+- For genuinely regulated data, the correct control is encrypting and access-restricting the
+  evidence store itself, not blanking the system's own operational output. Redaction is the
+  right tool for secrets that are never needed downstream (a password), not for the business
+  data the system exists to report.
+
+Known limitation: this means evidence for a real deployment would contain whatever the target
+shows on screen. The planned improvement is a configurable PII-redaction pass in the evidence
+logger, applied per capability.
 
 So the scope stays exactly here: real secrets (passwords, tokens, credentials) never hit disk;
-everything else -- the actual substance of what a capability did -- stays fully visible, because
-that visibility is the point.
+everything else stays visible.
 """
 from __future__ import annotations
 

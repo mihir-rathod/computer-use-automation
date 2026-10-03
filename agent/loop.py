@@ -1,16 +1,15 @@
-"""The LLM-driven observe -> decide -> act loop -- ASSIGNMENT_ORIGINAL.md 3.1. The model
+"""The LLM-driven observe -> decide -> act loop. The model
 decides WHAT to click/type/extract to accomplish the goal against real, live observed state
 (the structured element list from surface/aria.py, not pixels). Turning the resulting
 transcript into a typed, reusable artifact -- checkpoints, parameterization, error_handling --
 is agent/recorder.py's job, deliberately kept separate: the model discovers, the code
-structures. See REPORT.md heading 1 for the full rationale.
+structures.
 
-Stopping conditions (explicitly required by 3.1 -- "max steps, timeout, dead-end"): a step
+Stopping conditions (max steps, timeout, dead-end): a step
 budget, a wall-clock budget, and dead-end detection (the exact same tool call -- name and args --
 repeated back to back, meaning the model is clicking something that isn't doing anything). All
 three feed the same DiscoveryResult.stop_reason, which is exactly the kind of context
-PROJECT_PLAN.md Section 5 says an escalation/pause path needs -- not built here (Phase 9), but
-this is where that context originates.
+an escalation/pause path needs -- this is where that context originates.
 """
 from __future__ import annotations
 
@@ -33,7 +32,7 @@ DEAD_END_THRESHOLD = 3
 
 StopReason = Literal["finished", "give_up", "max_steps", "timeout", "dead_end", "error"]
 # Stop reasons that mean "the model is stuck," not "the model is done" -- these are what
-# escalate to a human (ASSIGNMENT_ORIGINAL.md 3.6) rather than just ending the run.
+# escalate to a human rather than just ending the run.
 _STUCK_REASONS = {"give_up", "dead_end", "max_steps", "timeout"}
 
 SYSTEM_INSTRUCTION = (
@@ -81,7 +80,7 @@ class DiscoveryLoop:
         self.timeout_seconds = timeout_seconds
         # On a "stuck" stop reason (give_up/dead_end/max_steps/timeout -- see _STUCK_REASONS),
         # this is what pauses and hands the live session to a human before the run ends,
-        # instead of just returning a failed DiscoveryResult (ASSIGNMENT_ORIGINAL.md 3.6).
+        # instead of just returning a failed DiscoveryResult.
         self.session_manager = session_manager
 
     def run(self, goal: str, parameters: dict[str, str], start_path: str | None = None) -> DiscoveryResult:
