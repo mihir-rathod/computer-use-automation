@@ -99,6 +99,8 @@ def diff_artifacts(a: Artifact, b: Artifact) -> ArtifactDiff:
         ("reviewed", a.provenance.reviewed, b.provenance.reviewed),
         ("approved_by", a.provenance.approved_by, b.provenance.approved_by),
         ("change_note", a.provenance.change_note, b.provenance.change_note),
+        ("commit_approvals", [(c.step_id, c.approver, c.mode) for c in a.provenance.commit_approvals],
+         [(c.step_id, c.approver, c.mode) for c in b.provenance.commit_approvals]),
         ("target.base_url", a.target.base_url, b.target.base_url),
     ):
         if x != y:

@@ -172,6 +172,10 @@ class RunStore:
                     prior = dict(prior)
                     verdict = self._judge_prior(prior)
                     if verdict.kind != "new":
+                        if json.loads(prior["params_json"]) != json.loads(json.dumps(params, default=str)):
+                            # Answering a *different* request with the first one's stored result would be wrong, and
+                            # for a commit it would silently drop the second request.
+                            return Claim("conflict", prior, f"idempotency key already used by run {prior['id']} with different parameters; use a new key")
                         return verdict
             run_id = new_run_id()
             db.execute(
@@ -211,6 +215,13 @@ class RunStore:
         with self._tx() as db:
             db.execute("UPDATE runs SET status=?, started_at=?, evidence_dir=COALESCE(?, evidence_dir) WHERE id=?",
                        (RUNNING, _now(), evidence_dir, run_id))
+
+    def claim_approved(self, run_id: str) -> bool:
+        """Atomically moves an approved run to running. Exactly one caller wins, so two concurrent resumes of the same
+        approval cannot both execute it (which, for a commit step, would be a double post)."""
+        with self._tx() as db:
+            cur = db.execute("UPDATE runs SET status=?, started_at=? WHERE id=? AND status=?", (RUNNING, _now(), run_id, APPROVED))
+            return cur.rowcount == 1
 
     def finish(self, run_id: str, result: ReplayResult, evidence_dir: str | None = None) -> None:
         with self._tx() as db:

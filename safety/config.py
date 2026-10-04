@@ -101,5 +101,6 @@ def may_approve(policy: PolicyConfig, approver: str, tier: ApprovalTier) -> tupl
     if role is None:
         return False, f"'{approver}' is not on the approver roster"
     if _TIER_RANK[role] < _TIER_RANK[tier]:
-        return False, f"'{approver}' is a {role}; this capability needs a {tier} approval"
+        article = "an" if role[0] in "aeiou" else "a"
+        return False, f"'{approver}' is {article} {role}; this capability needs {'an' if tier[0] in 'aeiou' else 'a'} {tier} approval"
     return True, ""

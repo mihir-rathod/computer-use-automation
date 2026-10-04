@@ -65,6 +65,7 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "login_capability": "mockbank.login",
         "login_path": "/login",
         "sandbox": True,
+        "app_id": "mockbank",
     },
     # Larkspur Clinic Ops (the legacy skin). Sandbox: a seeded demo clinic whose data resets on demand.
     "clinic": {
@@ -75,6 +76,7 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "login_capability": "clinic.login",
         "login_path": "/legacy/login",
         "sandbox": True,
+        "app_id": "clinic",
     },
     # Same app, signed on as the billing supervisor: write-offs and the approval queue.
     "clinic_supervisor": {
@@ -85,6 +87,7 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "login_capability": "clinic.login",
         "login_path": "/legacy/login",
         "sandbox": True,
+        "app_id": "clinic",
     },
 }
 
@@ -219,6 +222,8 @@ def run_replay(
             raise FileNotFoundError(f"unknown run '{resume_run_id}'")
         if run["status"] != APPROVED:
             raise ValueError(f"run {resume_run_id} is {run['status']}, not approved")
+        if capability_id and capability_id != run["capability_id"]:
+            raise ValueError(f"run {resume_run_id} is for {run['capability_id']}, not {capability_id}")
         # An approval is for a specific identity: resuming as a different target account would run it as someone else.
         if run["target"] and target not in (None, run["target"]):
             raise ValueError(f"run {resume_run_id} was requested for target '{run['target']}', not '{target}'")
@@ -227,10 +232,16 @@ def run_replay(
         artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir), version=run["version"])
         evidence_dir = Path(run["evidence_dir"])
         run_id_, tier = run["id"], (store.approvals_for(run["id"]) or [{}])[-1].get("tier")
-        store.mark_running(run_id_)
+        if not store.claim_approved(run_id_):
+            raise ValueError(f"run {resume_run_id} is already being executed or was executed by someone else")
     else:
         artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir))
         evidence_dir = evidence_dir or (EVIDENCE_ROOT / run_id("replay_run"))
+        profile_app = TARGET_PROFILES.get(target or "mockbank", {}).get("app_id")
+        if profile_app and artifact.target.app_id != profile_app:
+            early = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
+                code="target_mismatch", message=f"{capability_id} is a {artifact.target.app_id} capability but target '{target}' is a {profile_app} app"))
+            return early, evidence_dir
         tier = None if dry_run else required_approval(policy, artifact)
 
         violations = [] if dry_run else check_params(policy, capability_id, params)
@@ -252,6 +263,8 @@ def run_replay(
             stored = store.stored_result(claim.run)
             if stored is not None:
                 stored.deduplicated, stored.run_id = True, claim.run["id"]
+                if claim.run.get("resolution") == "committed":
+                    stored.committed = True  # a person confirmed against the target's records that it did take effect
                 return stored, Path(claim.run["evidence_dir"] or evidence_dir)
         if claim.kind != "new":
             existing = claim.run or {}
@@ -265,13 +278,19 @@ def run_replay(
             _write_evidence(evidence_dir, artifact, params, result, policy, target, dry_run, note=f"waiting for a {tier} approval")
             return result, evidence_dir
 
-    result = _replay_in_browser(
-        artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
-        headed=headed, slow_mo=slow_mo, evidence_dir=evidence_dir, operator_port=operator_port,
-        enable_operator_console=enable_operator_console, dry_run=dry_run, deadline_s=deadline_s, cancel_event=cancel_event,
-        confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
-        policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
-    )
+    try:
+        result = _replay_in_browser(
+            artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
+            headed=headed, slow_mo=slow_mo, evidence_dir=evidence_dir, operator_port=operator_port,
+            enable_operator_console=enable_operator_console, dry_run=dry_run, deadline_s=deadline_s, cancel_event=cancel_event,
+            confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
+            policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
+        # stays "running" for ever and its idempotency key is blocked. Close it as a failure and report it as one.
+        result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=ReplayError(
+            code="runner_error", message=f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else exc}"))
     result.run_id, result.approval_tier = run_id_, tier
     store.finish(run_id_, result, str(evidence_dir))
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -347,7 +366,7 @@ def _replay_in_browser(
             surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
             login_artifact, login = try_login(surface, profile["username"], profile["password"], profile["login_capability"], artifacts_dir)
             if login.status != ReplayStatus.SUCCESS:
-                err = login.error or ReplayError(message=login.status.value)
+                err = login.error or ReplayError(message=login.business_outcome or login.status.value, code=login.business_outcome)
                 failed = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
                     step_id=err.step_id, code="login_failed",
                     message=f"sign-on with {login_artifact.capability_id} failed at {err.step_id or 'its checkpoint'} ({err.code or login.status.value}): {err.message}"))

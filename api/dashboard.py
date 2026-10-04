@@ -88,6 +88,7 @@ def _parse_run(run_dir: Path) -> dict[str, Any] | None:
     start_data = start.get("data", {}) if start else {}
     kind = start_data.get("kind") or ("discovery" if run_dir.name.startswith("discovery_run") else "replay")
 
+    not_started = next((e for e in reversed(events) if e.get("event_type") == "run_not_started"), None)
     replay_result = next((e for e in reversed(events) if e.get("actor") == "replay" and e.get("event_type") == "result"), None)
     discovery_result = next((e for e in reversed(events) if e.get("actor") == "agent" and e.get("event_type") == "discovery_result"), None)
     ever_paused = any(e.get("event_type") == "pause" for e in events)
@@ -114,6 +115,12 @@ def _parse_run(run_dir: Path) -> dict[str, Any] | None:
         outputs = d.get("outputs")
         error_message = (d.get("error") or {}).get("message")
         finished_at = replay_result.get("ts")
+    elif not_started:
+        # refused by policy or waiting for approval: the run was recorded but no browser ever started
+        d = not_started.get("data", {})
+        status = d.get("status", "unknown")
+        error_message = (d.get("error") or {}).get("message") or d.get("note")
+        finished_at = not_started.get("ts")
     elif discovery_result:
         d = discovery_result.get("data", {})
         stop_reason = d.get("stop_reason")

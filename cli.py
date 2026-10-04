@@ -171,9 +171,24 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _replay(args: argparse.Namespace, params: dict, evidence_dir: Path):
+    return runtime.run_replay(
+        args.capability, params,
+        target=None if args.resume else args.target, base_url=args.base_url, username=args.username, password=args.password, allowlist=args.allowlist,
+        headed=args.headed, slow_mo=args.slow_mo, evidence_dir=evidence_dir,
+        operator_port=args.operator_port, enable_operator_console=not args.no_operator_console,
+        dry_run=args.dry_run, deadline_s=args.timeout,
+        idempotency_key=args.idempotency_key, requested_by=args.requested_by, resume_run_id=args.resume, repair_llm=args.repair_llm,
+    )
+
+
+
 def cmd_replay(args: argparse.Namespace) -> int:
     load_dotenv()
-    artifact = load_artifact_by_id(args.capability)
+    if not args.resume and args.capability not in storage.capability_ids():
+        print(f"error: unknown capability '{args.capability}'. known: {', '.join(storage.capability_ids())}")
+        return 1
+    artifact = load_artifact_by_id(args.capability) if not args.resume else None
     params = {} if args.resume else parse_params(args.param, input_schema=artifact.input_schema)
     # Computed here, not left to run_replay's own default, so the session id (== evidence_dir
     # name) is known up front -- the operator console URL can then be printed *before* the run
@@ -183,14 +198,11 @@ def cmd_replay(args: argparse.Namespace) -> int:
     if not args.no_operator_console:
         print(f"operator console (visit if this run pauses): http://127.0.0.1:{args.operator_port}/operator/{evidence_dir.name}")
 
-    result, evidence_dir = runtime.run_replay(
-        args.capability, params,
-        target=None if args.resume else args.target, base_url=args.base_url, username=args.username, password=args.password, allowlist=args.allowlist,
-        headed=args.headed, slow_mo=args.slow_mo, evidence_dir=evidence_dir,
-        operator_port=args.operator_port, enable_operator_console=not args.no_operator_console,
-        dry_run=args.dry_run, deadline_s=args.timeout,
-        idempotency_key=args.idempotency_key, requested_by=args.requested_by, resume_run_id=args.resume, repair_llm=args.repair_llm,
-    )
+    try:
+        result, evidence_dir = _replay(args, params, evidence_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"error: {exc}")
+        return 1
 
     print(f"status: {result.status.value}")
     if result.run_id:
@@ -206,7 +218,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
     if result.repair_proposal_id:
         print(f"repair proposal: {result.repair_proposal_id}  (cli.py repair show {result.repair_proposal_id})")
     if result.error:
-        print(f"error: {result.error.message}" + (f" (step {result.error.step_id})" if result.error.step_id else ""))
+        print(f"error: {result.error.message}" + (f" (step {result.error.step_id})" if result.error.step_id else "")
+              + (f" [{result.error.code}]" if result.error.code else ""))
     print(f"evidence: {evidence_dir}")
     return 1 if result.status in (ReplayStatus.HARD_FAILURE, ReplayStatus.NEEDS_REVIEW) else 0
 
@@ -267,7 +280,7 @@ def cmd_canary(args: argparse.Namespace) -> int:
 
 
 def cmd_runs(args: argparse.Namespace) -> int:
-    from runs.approvals import decide_run
+    from runs.approvals import decide_run, resolve_run
     from runs.store import RunError
     store, policy = runtime.default_store(), runtime.default_policy()
     cmd = args.runs_command
@@ -289,7 +302,7 @@ def cmd_runs(args: argparse.Namespace) -> int:
             run = decide_run(store, policy, args.run_id, "approved" if cmd == "approve" else "rejected", args.by, args.reason)
             print(f"{args.run_id}: {run['status']} by {args.by}")
         elif cmd == "resolve":
-            run = store.resolve(args.run_id, args.outcome, args.by, args.reason)
+            run = resolve_run(store, policy, args.run_id, args.outcome, args.by, args.reason)
             print(f"{args.run_id}: marked {args.outcome} by {args.by}")
     except RunError as exc:
         print(f"error: {exc}")
@@ -322,6 +335,15 @@ def cmd_artifact(args: argparse.Namespace) -> int:
         diff = diff_artifacts(load_artifact_by_id(args.capability, version=args.version_a), load_artifact_by_id(args.capability, version=args.version_b))
         print(json.dumps(diff.to_dict(), indent=2) if args.json else diff.to_text())
         return 0
+    if action in ("promote", "rollback"):
+        # what production replays is decided here, so it needs someone on the roster, at the capability's own tier
+        from safety.config import may_approve
+        policy = runtime.default_policy()
+        tier = policy.for_capability(args.capability).approval
+        allowed, why = may_approve(policy, args.by, "operator" if tier == "live" else tier)
+        if not allowed:
+            print(f"error: {why}")
+            return 1
     if action == "promote":
         findings = lint_artifact(load_artifact_by_id(args.capability, version=args.version))
         if has_errors(findings) and not args.force:

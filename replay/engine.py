@@ -184,6 +184,17 @@ class ReplayEngine:
                     error=hf.error, steps_completed=hf.steps_completed,
                     started_at=started_at, finished_at=datetime.now(UTC),
                 ))
+            except Exception as exc:  # noqa: BLE001 -- the browser died, the page vanished, a locator was malformed...
+                # If an irreversible step had already been issued, an unexpected crash is exactly the ambiguous case: report it
+                # as needs_review rather than as a plain failure someone might retry.
+                issued = self._commit_step is not None
+                return self._finish(artifact, started_at, ReplayResult(
+                    status=ReplayStatus.NEEDS_REVIEW if issued else ReplayStatus.HARD_FAILURE, capability_id=artifact.capability_id,
+                    error=ReplayError(step_id=self._commit_step, code="ambiguous_commit" if issued else "engine_error",
+                                      message=f"unexpected {type(exc).__name__} during replay"
+                                              + ("; a commit step had already been issued, so it was not retried" if issued else "")),
+                    started_at=started_at, finished_at=datetime.now(UTC),
+                ))
 
         final_outputs = {**artifact.success_output_defaults, **outputs}
         return self._finish(artifact, started_at, ReplayResult(

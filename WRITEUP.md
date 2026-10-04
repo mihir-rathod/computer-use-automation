@@ -205,6 +205,25 @@ Found while building phase 2 (each has a test):
     capabilities at drift level 2 and 0 of 7 at level 3 because unlabeled fields give no name to match
     on. The scoring was then changed to use position as the base signal. See the caveat under the table.
 
+Found by exercising the finished system by hand (each pinned in `tests/test_qa_regressions.py`):
+
+15. **One approval could be executed several times.** Four concurrent resumes of a single approved
+    refund each launched a browser. Resume now claims the approved run atomically; exactly one wins.
+16. **A connection error left a run "running" for ever and blocked its idempotency key.** An
+    unreachable target now closes the run as a `runner_error` failure and frees the key. An unexpected
+    crash after an irreversible step was issued is reported as `needs_review`, not a plain failure.
+17. **Settling an ambiguous commit, and promoting or rolling back a version, needed no roster.** Any
+    name worked. Both now require someone on the roster at the capability's tier.
+18. **`--resume` ignored `--capability`**, so resuming a refund run under the name of another
+    capability ran the refund. It now refuses a mismatch.
+19. **An idempotency key reused with different parameters returned the first request's result.** It is
+    now a conflict.
+20. **A pending-approval or policy-refused run showed as "running" on the dashboard.** Also: a
+    capability could be run against the wrong app (it hit an allowlist block instead of saying so), a
+    failed login reported nothing useful, and the CLI printed Python tracebacks for an unknown
+    capability or a bad resume. All fixed.
+
+
 ## Measured: drift and repair
 
 `scripts/drift_report.py` replays each clinic capability under each UI drift level against a running
@@ -234,7 +253,7 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Platform behavior | 200 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities, repair and canary |
+| Platform behavior | 212 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities, repair and canary |
 | Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | A retried commit posts exactly once | `tests/test_clinic_capabilities.py`: same-key retry, response lost after commit, request lost before commit; all asserted on the clinic audit log with its own duplicate guard off |
 | An irreversible step is not retried on a guess | `tests/test_replay_hardening.py` (needs_review, RETRY rule ignored, session expiry at commit) |
@@ -248,11 +267,12 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 
 These are verified against the code as of this writing.
 
-- **Approver identity is asserted, not authenticated.** The roster in `safety/policy.yaml` is enforced
+- **Approver identity is asserted, not authenticated.** The API even takes `requested_by` from the request body. The roster in `safety/policy.yaml` is enforced
   (right tier, not the requester), but nothing proves the caller is the person they name. Real
   authentication is phase 3.
-- **The supervised commit gate has not been exercised by a person in this build.** It is a terminal
-  prompt, tested with an injected answer function. The checked-in clinic artifacts were recorded with
+- **The supervised commit gate has not been used by a person at a keyboard.** It is a terminal prompt;
+  it was run once live against Gemini with the answers piped in (the approver landed in the artifact's
+  provenance) and is otherwise tested with an injected answer function. The checked-in clinic artifacts were recorded with
   `auto_sandbox`, which only a profile marked `sandbox` permits. `mockbank.open_subaccount` is still
   hand-written, and the `unreviewed` lint warning stands on every discovered artifact.
 - **Recording is only as good as the contract and the model.** All 8 clinic discoveries finished on

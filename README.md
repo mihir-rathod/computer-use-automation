@@ -173,7 +173,7 @@ uv run pytest
 The suite is offline: it starts MockBank and the clinic app in-process and drives a real Chromium
 against them. The live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY`
 is set, and the modern-skin browser tests skip until `clinic/modern` has been built.
-At the time of writing: 262 passing, 4 skipped without a key. The suite takes about five minutes
+At the time of writing: 274 passing, 4 skipped without a key. The suite takes about five minutes
 because it drives a real browser, including a full drift-repair loop.
 
 ## What is not done yet

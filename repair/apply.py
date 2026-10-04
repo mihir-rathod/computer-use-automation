@@ -60,7 +60,10 @@ def approve_repair(
     if has_errors(findings):
         raise ApprovalError("the repaired artifact fails validation: " + "; ".join(str(f) for f in findings if f.level == "error"))
 
-    storage.save_artifact(repaired, artifacts_dir, make_current=promote, by=by, reason=f"repair {proposal.id}: {reason}")
+    try:
+        storage.save_artifact(repaired, artifacts_dir, make_current=promote, by=by, reason=f"repair {proposal.id}: {reason}")
+    except storage.VersionExists:
+        raise ApprovalError("another repair was applied at the same moment; re-run to get a fresh proposal") from None
     store.decide_repair(proposal_id, "approved", by, reason, new_version=version)
     return {"capability_id": proposal.capability_id, "from": base.version, "to": version, "promoted": promote, "step_id": proposal.step_id}
 
