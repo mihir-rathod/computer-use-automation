@@ -169,3 +169,36 @@ def test_an_idempotency_key_cannot_be_reused_for_different_parameters():
     other = store.begin("clinic.issue_refund", "1.0.0", {"amount": "500.00"}, "alex", "same-key")
     assert other.kind == "conflict" and "different parameters" in other.reason
     assert store.begin("clinic.issue_refund", "1.0.0", {"amount": "10.00"}, "alex", "same-key").kind == "replay"
+
+
+def test_a_headed_browser_is_released_once_the_person_closes_its_windows():
+    """Found by the user: after reviewing a headed run and closing the tab or pressing Cmd+Q, Chrome for Testing stayed
+    running, because Playwright's driver was never stopped (on macOS it ignores both while attached)."""
+    class Page:
+        def __init__(self):
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_timeout(self, ms):
+            time.sleep(ms / 1000)
+
+    page = Page()
+
+    class Browser:
+        contexts = [type("Ctx", (), {"pages": [page]})()]
+
+        def is_connected(self):
+            return True
+
+    threading.Timer(0.6, lambda: setattr(page, "closed", True)).start()
+    started = time.monotonic()
+    runtime._wait_until_closed_by_user(Browser(), max_s=30)
+    assert 0.5 < time.monotonic() - started < 3  # returned because the window closed, not because of the backstop
+
+    # and the backstop still applies if nobody ever closes it
+    page.closed = False
+    started = time.monotonic()
+    runtime._wait_until_closed_by_user(Browser(), max_s=1.2)
+    assert 1.0 < time.monotonic() - started < 3

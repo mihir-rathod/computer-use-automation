@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -401,13 +402,37 @@ def _replay_in_browser(
     return _run_on_dedicated_thread(_job, headed=headed, slow_mo=slow_mo)
 
 
+# How long a finished headed run's browser may stay open waiting for a person to close it, as a backstop.
+HEADED_LINGER_MAX_S = 30 * 60
+
+
+def _wait_until_closed_by_user(browser: Any, max_s: float) -> None:
+    """Keeps the Playwright connection (and its event loop) alive until the person closes every tab or window of the
+    browser, or the backstop passes. On macOS, Chrome launched by Playwright ignores Cmd+Q and closing the last window
+    for as long as the driver is attached, so the driver has to be stopped *by us* once the windows are gone."""
+    deadline = time.monotonic() + max_s
+    while time.monotonic() < deadline:
+        try:
+            if not browser.is_connected():
+                return
+            pages = [pg for ctx in browser.contexts for pg in ctx.pages if not pg.is_closed()]
+            if not pages:
+                return
+            pages[0].wait_for_timeout(500)  # pumps Playwright's event loop, so close events are seen
+        except Exception:
+            return  # the page or browser went away mid-check: that is the person closing it
+
+
 def _run_on_dedicated_thread(job: Any, *, headed: bool, slow_mo: int) -> ReplayResult:
-    # Not `with sync_playwright() as p:` -- its __exit__ stops the driver unconditionally, killing the browser
-    # even if .close() is skipped (verified empirically) -- and not on the caller's thread either: a headed run
-    # that is deliberately left open leaves that thread's Playwright event-loop state dangling, which broke the
-    # *next unrelated request* on a shared API thread ("Playwright Sync API inside the asyncio loop"). A
-    # headed run is left open so a person can review the final state; only the headless path tears down.
+    # Not `with sync_playwright() as p:` -- its __exit__ stops the driver unconditionally -- and not on the caller's
+    # thread either: Playwright's sync API is bound to the thread that started it, and leaving one running on a shared
+    # API thread broke the *next unrelated request* ("Playwright Sync API inside the asyncio loop").
+    #
+    # A headed run's result is handed back as soon as it is ready, but its thread keeps the browser open so a person can
+    # review the final state. When they close the window (or Cmd+Q), the thread notices and stops the driver, which is
+    # what actually ends the Chrome process. Without that, the browser lingered until the whole server stopped.
     result_box: dict[str, ReplayResult | BaseException] = {}
+    ready = threading.Event()
 
     def _worker() -> None:
         p = sync_playwright().start()
@@ -418,14 +443,23 @@ def _run_on_dedicated_thread(job: Any, *, headed: bool, slow_mo: int) -> ReplayR
         except BaseException as exc:  # noqa: BLE001 -- re-raised on the calling thread below
             result_box["result"] = exc
         finally:
-            if not headed:
-                if browser is not None:
-                    browser.close()
-                p.stop()
+            ready.set()
+            try:
+                if headed and browser is not None:
+                    _wait_until_closed_by_user(browser, HEADED_LINGER_MAX_S)
+            finally:
+                try:
+                    if browser is not None:
+                        browser.close()
+                except Exception:
+                    pass
+                try:
+                    p.stop()
+                except Exception:
+                    pass
 
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    thread.join()
+    threading.Thread(target=_worker, daemon=True, name="headed-run" if headed else "dedicated-run").start()
+    ready.wait()
     outcome = result_box["result"]
     if isinstance(outcome, BaseException):
         raise outcome

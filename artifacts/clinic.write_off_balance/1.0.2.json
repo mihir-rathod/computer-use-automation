@@ -1,0 +1,514 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.write_off_balance",
+  "version": "1.0.2",
+  "name": "Write off an invoice balance",
+  "description": "Writes off part or all of an invoice's outstanding balance. Needs a supervisor sign-on.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "invoice": {
+        "type": "string",
+        "pattern": "^INV-[0-9]{5}$"
+      },
+      "amount": {
+        "type": "string",
+        "pattern": "^[0-9]+(\\.[0-9]{2})?$"
+      },
+      "reason": {
+        "type": "string",
+        "enum": [
+          "uncollectible",
+          "hardship",
+          "billing_error"
+        ]
+      }
+    },
+    "required": [
+      "invoice",
+      "amount",
+      "reason"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "written_off",
+          "not_found",
+          "validation_error",
+          "permission_denied"
+        ]
+      },
+      "receipt_number": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "BALANCE WRITTEN OFF",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/fn/writeoff"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/fn/writeoff",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field number)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='number']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Write off balance",
+            "Invoice no."
+          ],
+          "after": [
+            "Continue"
+          ],
+          "html_name": "number",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{invoice}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{invoice}}",
+        "target": {
+          "semantic_description": "textbox (form field number)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='number']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 1,
+            "before": [
+              "Write off balance",
+              "Invoice no."
+            ],
+            "after": [
+              "Continue"
+            ],
+            "html_name": "number",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Write off balance",
+            "Invoice no."
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/invoices/{{invoice}}/writeoff",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field amount)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='amount']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 2,
+          "before": [
+            "$0.00",
+            "Amount ($)"
+          ],
+          "after": [
+            "Reason",
+            "-- select --"
+          ],
+          "html_name": "amount",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{amount}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{amount}}",
+        "target": {
+          "semantic_description": "textbox (form field amount)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='amount']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 2,
+            "before": [
+              "$0.00",
+              "Amount ($)"
+            ],
+            "after": [
+              "Reason",
+              "-- select --"
+            ],
+            "html_name": "amount",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "select",
+      "target": {
+        "semantic_description": "combobox (form field reason)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "combobox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='reason']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "combobox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Reason",
+            "-- select --"
+          ],
+          "after": [
+            "Notes",
+            "Continue"
+          ],
+          "html_name": "reason",
+          "id": null
+        }
+      },
+      "params": {
+        "value": "{{reason}}"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Notes"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/transactions/writeoff/review",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "click",
+      "target": {
+        "semantic_description": "Confirm",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Confirm']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#confirm_btn",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Confirm",
+          "ordinal": 1,
+          "same_role_count": 3,
+          "before": [
+            "Uncollectible"
+          ],
+          "after": [
+            "Back"
+          ],
+          "html_name": null,
+          "id": "confirm_btn"
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/transactions/confirm",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "irreversible",
+      "idempotent": false
+    },
+    {
+      "step_id": "s8",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Receipt number' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Receipt number\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Receipt number"
+        }
+      },
+      "params": {},
+      "output_binding": "receipt_number",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "SUPERVISOR AUTHORIZATION REQUIRED",
+          "target": null,
+          "description": null
+        },
+        "outcome": "permission_denied",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "RECORD NOT FOUND",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Please correct the following",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "APPLICATION ERROR",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 2,
+        "backoff_ms": 300,
+        "backoff_multiplier": 2.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "YOUR SESSION HAS TIMED OUT",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": true
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261004T214312Z",
+    "created_at": "2026-10-04T21:43:21.519702Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": [
+      {
+        "step_id": "s7",
+        "approver": "auto:sandbox",
+        "mode": "auto_sandbox",
+        "at": "2026-10-04T21:43:21.519693Z"
+      }
+    ]
+  },
+  "success_output_defaults": {
+    "status": "written_off"
+  },
+  "canary": null
+}

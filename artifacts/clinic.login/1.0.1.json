@@ -1,0 +1,299 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.login",
+  "version": "1.0.1",
+  "name": "Sign on to the clinic system",
+  "description": "Signs on with a user ID and password.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": null,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "username": {
+        "type": "string"
+      },
+      "password": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "username",
+      "password"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "signed_in",
+          "invalid_credentials"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "Main menu",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/login"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field username)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#user_id",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='username']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 2,
+          "before": [
+            "Sign on",
+            "User ID"
+          ],
+          "after": [
+            "Password",
+            "Sign In"
+          ],
+          "html_name": "username",
+          "id": "user_id"
+        }
+      },
+      "params": {
+        "text": "{{username}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{username}}",
+        "target": {
+          "semantic_description": "textbox (form field username)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "#user_id",
+              "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='username']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 2,
+            "before": [
+              "Sign on",
+              "User ID"
+            ],
+            "after": [
+              "Password",
+              "Sign In"
+            ],
+            "html_name": "username",
+            "id": "user_id"
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field password)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='password']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "User ID",
+            "Password"
+          ],
+          "after": [
+            "Sign In"
+          ],
+          "html_name": "password",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{password}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{password}}",
+        "target": {
+          "semantic_description": "textbox (form field password)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='password']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 1,
+            "same_role_count": 2,
+            "before": [
+              "User ID",
+              "Password"
+            ],
+            "after": [
+              "Sign In"
+            ],
+            "html_name": "password",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Sign In",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Sign In']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Sign In",
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Password"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/menu",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Invalid user ID or password",
+          "target": null,
+          "description": null
+        },
+        "outcome": "invalid_credentials",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "read_only",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261004T210851Z",
+    "created_at": "2026-10-04T21:08:56.343104Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "signed_in"
+  },
+  "canary": null
+}
