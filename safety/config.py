@@ -96,6 +96,18 @@ def check_params(policy: PolicyConfig, capability_id: str, params: dict[str, Any
     return out
 
 
+ROLE_RANK = {"viewer": 0, "operator": 1, "supervisor": 2, "admin": 3}
+
+
+def role_allows(role: str, tier: str) -> tuple[bool, str]:
+    """For API callers, whose role comes from their key rather than the policy roster."""
+    needed = "supervisor" if tier == "supervisor" else "operator"
+    if ROLE_RANK.get(role, -1) < ROLE_RANK[needed]:
+        article = "an" if needed[0] in "aeiou" else "a"
+        return False, f"this needs {article} {needed} (your key is {role})"
+    return True, ""
+
+
 def may_approve(policy: PolicyConfig, approver: str, tier: ApprovalTier) -> tuple[bool, str]:
     role = policy.approvers.get(approver)
     if role is None:

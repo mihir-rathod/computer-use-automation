@@ -58,7 +58,7 @@ def _operator_console_url() -> str:
 _JSON_TO_GEMINI_TYPE = {"string": "STRING", "number": "NUMBER", "integer": "INTEGER", "boolean": "BOOLEAN"}
 
 SYSTEM_INSTRUCTION = (
-    "You are an operator-facing assistant for a banking back-office system. Each available "
+    "You are an operator-facing assistant for back-office systems (a credit-union core and a clinic front desk and billing portal). Each available "
     "tool is one real, callable capability against it -- call exactly one tool that matches what "
     "the user is asking for, with the exact "
     "argument values they gave (or that are obviously and unambiguously implied). If the "
@@ -131,6 +131,29 @@ _CAPABILITY_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Words a model writes when it has no value but the schema insists on one. Found live: asked to change only a phone
+# number, Gemini filled the other required fields with "unknown" and the run went ahead. A placeholder like that can pass
+# the target's own validation (an address of "unknown" is a valid string) and then it is written to a real record.
+_PLACEHOLDERS = {"unknown", "n/a", "na", "none", "null", "tbd", "not provided", "not specified", "unspecified", "?", "-", "--", "placeholder", "example", "test"}
+
+
+def _check_arguments(artifact: Any, args: dict[str, Any], message: str) -> str | None:
+    """Returns a plain-language question when the model's arguments cannot be trusted, else None. This is the schema-level
+    validation the keyword table below was always a stopgap for."""
+    from replay.validation import validate_input
+
+    missing = [f for f in artifact.input_schema.required if f not in args or args[f] in (None, "")]
+    invented = [k for k, v in args.items() if isinstance(v, str) and v.strip().lower() in _PLACEHOLDERS]
+    if missing or invented:
+        needed = missing + invented
+        return (f"To {artifact.name.lower()} I still need: {', '.join(needed)}. "
+                "Please include the exact value(s) in your message; I won't guess at them.")
+    problems = validate_input(artifact.input_schema, args)
+    if problems:
+        return f"I can't run {artifact.name.lower()} with that: {'; '.join(problems)}."
+    return None
+
+
 def _capability_matches_message(capability_id: str, message: str) -> bool:
     keywords = _CAPABILITY_KEYWORDS.get(capability_id, ())
     if not keywords:
@@ -188,7 +211,7 @@ def _render_result(capability_id: str, result: dict[str, Any]) -> str:
     err = result.get("error") or {}
     run_id = Path(result["evidence_dir"]).name
     if status == "pending_approval":
-        return (f"{capability_id} needs a {result.get('approval_tier')} approval before it can run (run {result.get('run_id')}). "
+        return (f"{capability_id} needs {'an' if str(result.get('approval_tier'))[:1] in 'aeiou' else 'a'} {result.get('approval_tier')} approval before it can run (run {result.get('run_id')}). "
                 "Nothing has been done yet.")
     if status == "needs_review":
         return (f"{capability_id} was submitted but its outcome could not be confirmed, so it was NOT retried (run {result.get('run_id')}). "
@@ -248,11 +271,23 @@ def _run_capability_async(entry: dict[str, Any], capability_id: str, target: str
         entry["done"] = True
 
 
+def _capability_summary() -> list[dict[str, Any]]:
+    """What the page lists, built from the real artifacts so it cannot drift from what is actually callable."""
+    rows = []
+    for artifact in list_artifacts():
+        if artifact.preconditions is None:
+            continue
+        required = list(artifact.input_schema.required)
+        rows.append({"name": artifact.name, "required": required,
+                     "optional": [k for k in artifact.input_schema.properties if k not in required]})
+    return sorted(rows, key=lambda r: r["name"])
+
+
 @router.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request):
     pending = bool(_HISTORY) and not _HISTORY[-1].get("done", True)
     return templates.TemplateResponse(request, "chat.html", {
-        "history": _display_history(), "settings": _SETTINGS,
+        "history": _display_history(), "settings": _SETTINGS, "capabilities": _capability_summary(),
         "operator_console_url": _operator_console_url(), "pending": pending,
     })
 
@@ -301,13 +336,18 @@ def chat_send(message: str = Form(...), headed: bool = Form(False), slow_mo: int
         _HISTORY.append({"role": "assistant", "text": f"Model picked an unrecognized tool ('{fn.name}').", "done": True})
         return RedirectResponse("/chat", status_code=303)
 
+    problem = _check_arguments(artifact, dict(fn.args), message)
+    if problem:
+        _HISTORY.append({"role": "assistant", "text": problem, "done": True})
+        return RedirectResponse("/chat", status_code=303)
+
     if not _capability_matches_message(artifact.capability_id, message):
         _HISTORY.append({
             "role": "assistant",
             "text": (
                 f"I picked \"{artifact.name}\" for that, but I'm not confident it's actually "
                 "what you meant -- likely because a specific value this needs (an exact email, "
-                "phone, address, share, or reason) wasn't in the message. Try rephrasing with "
+                "phone, address, amount, or reason) wasn't in the message. Try rephrasing with "
                 "every specific value included."
             ),
             "done": True,

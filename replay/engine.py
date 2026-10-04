@@ -103,6 +103,7 @@ class ReplayEngine:
         self._deadline_at: float | None = None
         self._commit_step: str | None = None  # irreversible step issued (ambiguous or confirmed)
         self._committed = False
+        self._skipped: list[str] = []
         self.evidence_logger = evidence_logger
         self.artifacts_dir = artifacts_dir
         self.reauth_credentials = reauth_credentials
@@ -139,10 +140,13 @@ class ReplayEngine:
         # and substitute() has no notion of "this template variable is allowed to be missing."
         # Only fills gaps for properties the artifact itself declares optional; validate_input
         # above already enforces required ones strictly, so this can't mask a real caller error.
+        conditional = {s.when_present for s in artifact.steps if s.when_present}
         variables = {
-            k: "" for k in artifact.input_schema.properties if k not in artifact.input_schema.required
+            k: "" for k in artifact.input_schema.properties if k not in artifact.input_schema.required and k not in conditional
         }
-        variables.update(inputs)
+        # An input an artifact marks `when_present` is genuinely optional: omitted (or null) means "leave that field alone",
+        # so it is neither backfilled nor sent. An empty string, by contrast, is a deliberate "set it to empty".
+        variables.update({k: v for k, v in inputs.items() if v is not None or k not in conditional})
         restarts = 0
         while True:
             try:
@@ -211,6 +215,9 @@ class ReplayEngine:
         non_idempotent_done = False
 
         for step in artifact.steps:
+            if step.when_present and step.when_present not in variables:
+                self._skipped.append(step.step_id)
+                continue
             if self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE:
                 raise _DryRunStop(step.step_id, completed, dict(outputs))
             extracted = self._run_step_with_recovery(artifact, step, variables, completed, non_idempotent_done)
@@ -458,6 +465,7 @@ class ReplayEngine:
         result.escalated = self._escalated
         result.recovered = self._recovered
         result.committed = self._committed
+        result.steps_skipped = list(self._skipped)
         result.commit_step = self._commit_step
         if self.evidence_logger is not None:
             self.evidence_logger.log(

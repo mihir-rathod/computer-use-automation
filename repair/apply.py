@@ -10,13 +10,13 @@ from typing import Any
 from artifacts_lib import storage
 from artifacts_lib.lint import has_errors, lint_artifact
 from repair.propose import RepairProposal
-from runs.store import ApprovalError, RunStore
-from safety.config import PolicyConfig, may_approve
+from runs.store import ApprovalError, NotPermitted, RunStore
+from safety.config import PolicyConfig, may_approve, role_allows
 
 
 def approve_repair(
     store: RunStore, policy: PolicyConfig, proposal_id: str, by: str, reason: str,
-    artifacts_dir: Path = storage.DEFAULT_ARTIFACTS_DIR, promote: bool = True,
+    artifacts_dir: Path = storage.DEFAULT_ARTIFACTS_DIR, promote: bool = True, role: str | None = None,
 ) -> dict[str, Any]:
     if not reason.strip():
         raise ApprovalError("approving a repair needs a reason")
@@ -30,9 +30,9 @@ def approve_repair(
         raise ApprovalError("this proposal found no confident match, so there is nothing to approve; fix the artifact by hand or re-discover")
 
     tier = "supervisor" if proposal.touches_irreversible_step else "operator"
-    allowed, why = may_approve(policy, by, tier)
+    allowed, why = role_allows(role, tier) if role else may_approve(policy, by, tier)
     if not allowed:
-        raise ApprovalError(why)
+        raise NotPermitted(why)
 
     base = storage.load_artifact_by_id(proposal.capability_id, artifacts_dir, proposal.base_version)
     current = storage.current_version(proposal.capability_id, artifacts_dir)

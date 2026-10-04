@@ -14,6 +14,7 @@ the caller asserts; see safety/policy.yaml.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import sqlite3
@@ -75,6 +76,15 @@ CREATE TABLE IF NOT EXISTS repairs (
     reason TEXT,
     new_version TEXT
 );
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT
+);
 CREATE TABLE IF NOT EXISTS canary_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     capability_id TEXT NOT NULL,
@@ -93,6 +103,7 @@ PENDING_APPROVAL = "pending_approval"
 APPROVED = "approved"
 REJECTED = "rejected"
 RUNNING = "running"
+QUEUED = "queued"  # accepted by the async API, waiting for a worker
 ABANDONED = "abandoned"  # a needs_review run a person confirmed did NOT commit; its key is free again
 
 _REUSABLE_STATUSES = {ReplayStatus.SUCCESS.value, ReplayStatus.BUSINESS_OUTCOME.value}
@@ -104,6 +115,10 @@ class RunError(Exception):
 
 class ApprovalError(RunError):
     pass
+
+
+class NotPermitted(ApprovalError):
+    """The caller lacks the role or roster entry for this decision (HTTP 403), as opposed to the decision being invalid (409)."""
 
 
 @dataclass
@@ -191,7 +206,7 @@ class RunStore:
         resolution = prior["resolution"]
         if resolution == "committed" or committed or status in _REUSABLE_STATUSES:
             return Claim("replay", prior, "an earlier run with this idempotency key already completed")
-        if status in (RUNNING, PENDING_APPROVAL, APPROVED):
+        if status in (RUNNING, QUEUED, PENDING_APPROVAL, APPROVED):
             return Claim("conflict", prior, f"run {prior['id']} with this idempotency key is still {status}")
         if status == ReplayStatus.NEEDS_REVIEW.value and resolution is None:
             return Claim("conflict", prior, f"run {prior['id']} may have committed and has not been settled; resolve it before retrying")
@@ -216,11 +231,11 @@ class RunStore:
             db.execute("UPDATE runs SET status=?, started_at=?, evidence_dir=COALESCE(?, evidence_dir) WHERE id=?",
                        (RUNNING, _now(), evidence_dir, run_id))
 
-    def claim_approved(self, run_id: str) -> bool:
+    def claim_approved(self, run_id: str, to_status: str = RUNNING) -> bool:
         """Atomically moves an approved run to running. Exactly one caller wins, so two concurrent resumes of the same
         approval cannot both execute it (which, for a commit step, would be a double post)."""
         with self._tx() as db:
-            cur = db.execute("UPDATE runs SET status=?, started_at=? WHERE id=? AND status=?", (RUNNING, _now(), run_id, APPROVED))
+            cur = db.execute("UPDATE runs SET status=?, started_at=? WHERE id=? AND status=?", (to_status, _now(), run_id, APPROVED))
             return cur.rowcount == 1
 
     def finish(self, run_id: str, result: ReplayResult, evidence_dir: str | None = None) -> None:
@@ -254,6 +269,52 @@ class RunStore:
             db.execute("INSERT INTO approvals(run_id,tier,requested_by,requested_at,decision,decided_by,decided_at,reason) VALUES(?,?,?,?,?,?,?,?)",
                        (run_id, "resolution", by, _now(), outcome, by, _now(), reason))
         return self.get(run_id)  # type: ignore[return-value]
+
+    # ---- API keys ---------------------------------------------------------------------------
+
+    ROLES = ("viewer", "operator", "supervisor", "admin")
+
+    @staticmethod
+    def _hash_key(key: str) -> str:
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def create_key(self, name: str, role: str) -> str:
+        """Returns the key ONCE; only its hash is stored, so a lost key is replaced, never recovered. The key's name is the
+        identity recorded on every run, approval and decision made with it."""
+        if role not in self.ROLES:
+            raise RunError(f"role must be one of {', '.join(self.ROLES)}")
+        if not name.strip():
+            raise RunError("a key needs a name")
+        key = "cua_" + secrets.token_urlsafe(24)
+        with self._tx() as db:
+            db.execute("INSERT INTO api_keys(name, role, key_hash, created_at) VALUES(?,?,?,?)", (name.strip(), role, self._hash_key(key), _now()))
+        return key
+
+    def authenticate(self, key: str) -> dict[str, Any] | None:
+        row = self._row("SELECT * FROM api_keys WHERE key_hash=? AND revoked_at IS NULL", (self._hash_key(key),))
+        if row is not None:
+            with self._tx() as db:
+                db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (_now(), row["id"]))
+        return row
+
+    def list_keys(self) -> list[dict[str, Any]]:
+        return self._rows("SELECT id, name, role, created_at, last_used_at, revoked_at FROM api_keys ORDER BY id")
+
+    def revoke_key(self, name: str) -> int:
+        with self._tx() as db:
+            return db.execute("UPDATE api_keys SET revoked_at=? WHERE name=? AND revoked_at IS NULL", (_now(), name)).rowcount
+
+    def recover_interrupted(self, has_commit_step: Any) -> list[str]:
+        """Run on server start. A run still marked running or queued belonged to a process that is gone. If it could have
+        issued an irreversible step it is needs_review (unknown), otherwise a plain failure; either way it stops blocking."""
+        recovered = []
+        for run in self._rows("SELECT id, capability_id FROM runs WHERE status IN (?, ?)", (RUNNING, QUEUED)):
+            ambiguous = bool(has_commit_step(run["capability_id"]))
+            with self._tx() as db:
+                db.execute("UPDATE runs SET status=?, error_code='interrupted', finished_at=? WHERE id=?",
+                           (ReplayStatus.NEEDS_REVIEW.value if ambiguous else ReplayStatus.HARD_FAILURE.value, _now(), run["id"]))
+            recovered.append(run["id"])
+        return recovered
 
     # ---- repair proposals and canaries -------------------------------------------------------
 

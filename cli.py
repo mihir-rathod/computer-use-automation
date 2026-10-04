@@ -279,6 +279,25 @@ def cmd_canary(args: argparse.Namespace) -> int:
     return 0 if all(o.ok for o in outcomes) else 1
 
 
+def cmd_keys(args: argparse.Namespace) -> int:
+    from runs.store import RunError
+    store = runtime.default_store()
+    try:
+        if args.keys_command == "create":
+            key = store.create_key(args.name, args.role)
+            print(f"API key for {args.name} ({args.role}). It is shown once and cannot be recovered:\n\n  {key}\n\nUse it as:  Authorization: Bearer {key}")
+        elif args.keys_command == "list":
+            for k in store.list_keys():
+                print(f"{k['name']:<20} {k['role']:<11} created {k['created_at']}  last used {k['last_used_at'] or '-'}" + ("  REVOKED" if k["revoked_at"] else ""))
+        elif args.keys_command == "revoke":
+            n = store.revoke_key(args.name)
+            print(f"revoked {n} key(s) named {args.name}")
+    except RunError as exc:
+        print(f"error: {exc}")
+        return 1
+    return 0
+
+
 def cmd_runs(args: argparse.Namespace) -> int:
     from runs.approvals import decide_run, resolve_run
     from runs.store import RunError
@@ -466,6 +485,16 @@ def main() -> int:
     ch.add_argument("--capability", default=None)
     ch.add_argument("--limit", type=int, default=20)
     canary_p.set_defaults(func=cmd_canary)
+
+    keys_p = sub.add_parser("keys", help="Create, list and revoke API keys (the key's name is the identity recorded on approvals)")
+    ksub = keys_p.add_subparsers(dest="keys_command", required=True)
+    kc = ksub.add_parser("create")
+    kc.add_argument("--name", required=True)
+    kc.add_argument("--role", required=True, choices=["viewer", "operator", "supervisor", "admin"])
+    ksub.add_parser("list")
+    kr = ksub.add_parser("revoke")
+    kr.add_argument("--name", required=True)
+    keys_p.set_defaults(func=cmd_keys)
 
     runs_p = sub.add_parser("runs", help="List and inspect recorded runs and pending approvals")
     rsub = runs_p.add_subparsers(dest="runs_command", required=True)

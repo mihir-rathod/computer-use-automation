@@ -324,7 +324,13 @@ class WebSurface(Surface):
                 pw_locator.select_option(value=wanted, timeout=1500)
             except Exception:
                 # a model often names the option by its visible label ("Weather") rather than its value ("weather")
-                pw_locator.select_option(label=wanted)
+                try:
+                    pw_locator.select_option(label=wanted, timeout=1500)
+                except Exception:
+                    offered = pw_locator.evaluate("el => Array.from(el.options).filter(o => o.value).map(o => o.value)")
+                    self._dispatched = False  # nothing was selected, so nothing was sent
+                    return ActionResult(success=False, resolved_target=resolved_target, resolved_strategy=resolved_strategy, dispatched=False,
+                                        error=f"option {wanted!r} is not offered; the list has: {', '.join(offered)}")
             actual = pw_locator.evaluate("el => el.value")
             return ActionResult(success=True, resolved_target=resolved_target, resolved_strategy=resolved_strategy,
                                 applied_params={"value": actual} if actual != wanted else None)

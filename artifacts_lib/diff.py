@@ -71,6 +71,8 @@ def _step_details(a: Step, b: Step) -> list[str]:
         details.append("checkpoint changed")
     if a.risk_level != b.risk_level:
         details.append(f"risk: {a.risk_level.value} -> {b.risk_level.value}")
+    if a.when_present != b.when_present:
+        details.append(f"when_present: {a.when_present} -> {b.when_present}")
     if a.idempotent != b.idempotent:
         details.append(f"idempotent: {a.idempotent} -> {b.idempotent}")
     if a.output_binding != b.output_binding:

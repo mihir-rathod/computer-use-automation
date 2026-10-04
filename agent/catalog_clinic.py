@@ -104,14 +104,16 @@ def patient_lookup(base_url: str):
 def update_patient_contact(base_url: str):
     return _spec(dict(
         capability_id="clinic.update_patient_contact", version="1.0.0", name="Update a patient's contact details",
-        description="Replaces a patient's phone, email and address.",
+        description="Updates a patient's phone, email and/or address. Give only the fields to change; the rest are left as they are.",
         goal=("Search for the patient with the given MRN, open their record with the Select link, follow Update contact, replace the phone, "
               "email and address with the given values and press Save changes. Finish when CONTACT INFORMATION UPDATED shows."),
         start_path="/legacy/patients",
-        input_schema=_schema({"mrn": _str(pattern=r"^LK-[0-9]{6}$"), "phone": _str(), "email": _str(), "address": _str()}, ["mrn", "phone", "email", "address"]),
-        output_schema=_out(["updated", "not_found", "validation_error"]),
+        input_schema=JSONSchemaObject(
+            properties={"mrn": _str(pattern=r"^LK-[0-9]{6}$"), "phone": _str(minLength=1), "email": _str(minLength=1), "address": _str(minLength=1)},
+            required=["mrn"], at_least_one_of=["phone", "email", "address"]),
+        output_schema=_out(["updated", "no_change", "not_found", "validation_error"]),
         success_checkpoint=_text("CONTACT INFORMATION UPDATED"),
-        error_handling=clinic_errors(("No patients matched your search", "not_found"), VALIDATION),
+        error_handling=clinic_errors(("No patients matched your search", "not_found"), ("NO CHANGES WERE NEEDED", "no_change"), VALIDATION),
         safety=SafetyMeta(risk_level=CapabilityRiskLevel.STATE_CHANGING, requires_confirmation=False),
         success_output_defaults={"status": "updated"},
     ), base_url)

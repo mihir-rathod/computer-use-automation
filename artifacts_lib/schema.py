@@ -148,6 +148,12 @@ class Step(BaseModel):
                      "Artifact.success_checkpoint, which confirms the overall goal was reached.",
     )
     risk_level: StepRiskLevel = StepRiskLevel.SAFE
+    when_present: str | None = Field(
+        default=None,
+        description="Name of an optional input. The step (and its checkpoint) runs only if the caller supplied that input; "
+                     "otherwise it is skipped and whatever the page already holds stays. This is what makes a partial update "
+                     "possible: change one field without re-sending, or wiping, the others.",
+    )
     idempotent: bool = Field(
         default=True,
         description="False for e.g. a final submit that creates a record. Replay must never "
@@ -212,12 +218,19 @@ class JSONSchemaObject(BaseModel):
     type: Literal["object"] = "object"
     properties: dict[str, dict[str, Any]] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
+    at_least_one_of: list[str] = Field(
+        default_factory=list,
+        description="For an update capability whose individual fields are all optional: the caller must supply at least one of these.",
+    )
 
     @model_validator(mode="after")
     def required_fields_are_declared(self) -> JSONSchemaObject:
         unknown = set(self.required) - set(self.properties.keys())
         if unknown:
             raise ValueError(f"required field(s) {sorted(unknown)} not present in properties")
+        unknown = set(self.at_least_one_of) - set(self.properties.keys())
+        if unknown:
+            raise ValueError(f"at_least_one_of field(s) {sorted(unknown)} not present in properties")
         return self
 
 
@@ -384,6 +397,11 @@ class Artifact(BaseModel):
     def steps_non_empty_with_unique_ids(self) -> Artifact:
         if not self.steps:
             raise ValueError("artifact must have at least one step")
+        for s in self.steps:
+            if s.when_present and s.when_present not in self.input_schema.properties:
+                raise ValueError(f"step {s.step_id} is conditional on '{s.when_present}', which is not a declared input")
+            if s.when_present and s.when_present in self.input_schema.required:
+                raise ValueError(f"step {s.step_id} is conditional on '{s.when_present}', but that input is required, so it is always present")
         ids = [s.step_id for s in self.steps]
         if len(ids) != len(set(ids)):
             dupes = sorted({i for i in ids if ids.count(i) > 1})

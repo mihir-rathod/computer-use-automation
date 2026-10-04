@@ -15,6 +15,8 @@ concurrent requests -- no asyncio wrapping needed for something this simple.
 """
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -32,10 +34,40 @@ load_dotenv()
 
 from api.chatbot import router as chatbot_router
 from api.dashboard import router as dashboard_router
+from api.v1 import router as v1_router
 
-app = FastAPI(title="Capability API")
+def _recover_interrupted_runs() -> None:
+    """Runs left `running`/`queued` by a process that died would block their idempotency keys for ever."""
+    import runtime
+    from artifacts_lib import storage
+    from safety.config import irreversible_step_ids
+
+    def has_commit(capability_id: str) -> bool:
+        try:
+            return bool(irreversible_step_ids(storage.load_artifact_by_id(capability_id)))
+        except Exception:
+            return True  # cannot tell, so assume it could have committed
+
+    runtime.default_store().recover_interrupted(has_commit)
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    _recover_interrupted_runs()
+    yield
+
+
+app = FastAPI(
+    lifespan=_lifespan,
+    title="Capability API",
+    description="`/v1` is the authenticated, asynchronous API (send `Authorization: Bearer <key>`; create keys with `cli.py keys create`). "
+                "`/capabilities/{id}/invoke` is the older synchronous endpoint the chatbot and dashboard still use.",
+)
+
+
 app.include_router(chatbot_router)
 app.include_router(dashboard_router)
+app.include_router(v1_router)
 
 # Started here, not left to the first invoke's own lazy start (runtime.run_replay ->
 # ensure_operator_console): the chatbot page links to this console as soon as it loads (see
@@ -93,6 +125,14 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
     """
     if body.target not in TARGET_PROFILES:
         raise HTTPException(status_code=422, detail=f"unknown target '{body.target}' -- known: {sorted(TARGET_PROFILES)}")
+    # This endpoint is unauthenticated, so a caller must not be able to point a run (and the profile's credentials) at an
+    # arbitrary host, or make it write evidence anywhere on disk. Those overrides exist for tests and are off by default.
+    if (body.base_url or body.username or body.password) and os.environ.get("ALLOW_TARGET_OVERRIDE") != "1":
+        raise HTTPException(status_code=422, detail="base_url, username and password cannot be supplied on this endpoint; the target profile decides them")
+    if body.evidence_dir:
+        from runtime import EVIDENCE_ROOT
+        if not Path(body.evidence_dir).resolve().is_relative_to(EVIDENCE_ROOT.resolve()):
+            raise HTTPException(status_code=422, detail="evidence_dir must be inside the server's evidence directory")
     try:
         result, evidence_dir = run_replay(
             capability_id, body.params,

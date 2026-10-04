@@ -28,6 +28,7 @@ load_dotenv()
 def _isolated_run_store(tmp_path, monkeypatch):
     """Every test gets its own run database, so runs recorded by one never dedupe or cap another."""
     monkeypatch.setenv("RUN_DB_PATH", str(tmp_path / "runs.db"))
+    monkeypatch.setenv("ALLOW_TARGET_OVERRIDE", "1")  # the legacy API refuses base_url/credential overrides unless this is set
 
 
 def _free_port() -> int:

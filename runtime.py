@@ -9,6 +9,8 @@ exact same logic -- before that there was nothing to share yet.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 import os
 import secrets
 import threading
@@ -29,8 +31,9 @@ from evidence_lib.logger import EvidenceLogger
 from evidence_lib.redaction import Redactor
 from repair.propose import propose_repair
 from replay.engine import ReplayEngine
+from replay.validation import validate_input
 from replay.result import ReplayError, ReplayResult, ReplayStatus
-from runs.store import APPROVED, PENDING_APPROVAL, RUNNING, RunStore
+from runs.store import APPROVED, PENDING_APPROVAL, QUEUED, RUNNING, RunStore
 from safety.allowlist import DEFAULT_ALLOWLIST_PATH, AllowlistConfig, AllowlistPolicy
 from safety.config import DEFAULT_POLICY_PATH, PolicyConfig, PolicyViolation, check_params, irreversible_step_ids, required_approval
 from safety.policy import SafetyPolicy
@@ -179,7 +182,32 @@ def _early_result(artifact: Artifact, status: ReplayStatus, run_id: str | None, 
     return ReplayResult(status=status, capability_id=artifact.capability_id, run_id=run_id, started_at=now, finished_at=now, **kw)
 
 
-def run_replay(
+@dataclass
+class Early:
+    """The run's outcome was settled without a browser (refused, deduplicated, waiting for an approval)."""
+    result: ReplayResult
+    evidence_dir: Path
+
+
+@dataclass
+class Prepared:
+    """A run that has been validated, authorised and recorded, and is ready to execute."""
+    run_id: str
+    evidence_dir: Path
+    execute: Callable[..., ReplayResult]
+
+
+def run_replay(capability_id: str, params: dict[str, Any], **kwargs: Any) -> tuple[ReplayResult, Path]:
+    """The one function every synchronous front door (CLI `replay`, the legacy capability API, the chatbot) calls: policy caps,
+    approval, idempotency and the run record all happen in `prepare_run`, so no front door can skip them. The async API calls
+    `prepare_run` itself and executes on a worker; both take exactly this path."""
+    prepared = prepare_run(capability_id, params, **kwargs)
+    if isinstance(prepared, Early):
+        return prepared.result, prepared.evidence_dir
+    return prepared.execute(), prepared.evidence_dir
+
+
+def prepare_run(
     capability_id: str,
     params: dict[str, Any],
     *,
@@ -203,11 +231,14 @@ def run_replay(
     policy: PolicyConfig | None = None,
     repair_llm: bool = False,
     artifacts_dir: Path | None = None,
-) -> tuple[ReplayResult, Path]:
-    """The one function every front door (CLI `replay`, the capability API, the chatbot) calls: policy
-    caps, approval, idempotency and the run record all happen here, so no front door can skip them.
+    queued: bool = False,
+    version: str | None = None,
+) -> Early | Prepared:
+    """Everything that happens before a browser is needed: input validation, policy caps, the idempotency claim, the approval
+    request and the run record. Returns `Early` when the answer is already known (refused, deduplicated, waiting for approval)
+    or `Prepared`, whose `execute()` runs it. `queued=True` records the run as queued so an async caller can return its id now.
 
-    Returns (result, evidence_dir). Possible shapes beyond a finished run:
+    Possible early shapes:
       * PENDING_APPROVAL -- policy requires a recorded approval; approve the run, then call again with
         `resume_run_id` to execute it.
       * `deduplicated=True` -- `idempotency_key` matched an earlier run that completed; its stored result
@@ -233,16 +264,20 @@ def run_replay(
         artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir), version=run["version"])
         evidence_dir = Path(run["evidence_dir"])
         run_id_, tier = run["id"], (store.approvals_for(run["id"]) or [{}])[-1].get("tier")
-        if not store.claim_approved(run_id_):
+        if not store.claim_approved(run_id_, QUEUED if queued else RUNNING):
             raise ValueError(f"run {resume_run_id} is already being executed or was executed by someone else")
     else:
-        artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir))
+        artifact = load_artifact_by_id(capability_id, version=version, **_dir_kw(artifacts_dir))
         evidence_dir = evidence_dir or (EVIDENCE_ROOT / run_id("replay_run"))
+        # A request that cannot possibly run must not reach an approver's queue or burn an idempotency key.
+        problems = validate_input(artifact.input_schema, params)
+        if problems:
+            return Early(_early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(message="; ".join(problems), code="input_invalid")), evidence_dir)
         profile_app = TARGET_PROFILES.get(target or "mockbank", {}).get("app_id")
         if profile_app and artifact.target.app_id != profile_app:
             early = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
                 code="target_mismatch", message=f"{capability_id} is a {artifact.target.app_id} capability but target '{target}' is a {profile_app} app"))
-            return early, evidence_dir
+            return Early(early, evidence_dir)
         tier = None if dry_run else required_approval(policy, artifact)
 
         violations = [] if dry_run else check_params(policy, capability_id, params)
@@ -255,49 +290,55 @@ def run_replay(
                                    error=ReplayError(message="; ".join(v.message for v in violations), code=violations[0].code))
             store.finish(claim.run["id"], result, str(evidence_dir))
             _write_evidence(evidence_dir, artifact, params, result, policy, target, dry_run, note="refused by policy before any browser started")
-            return result, evidence_dir
+            return Early(result, evidence_dir)
 
         needs_approval = tier in ("operator", "supervisor")
         claim = store.begin(capability_id, artifact.version, params, requested_by, None if dry_run else idempotency_key,
-                            status=PENDING_APPROVAL if needs_approval else RUNNING, evidence_dir=str(evidence_dir), target=target)
+                            status=PENDING_APPROVAL if needs_approval else (QUEUED if queued else RUNNING), evidence_dir=str(evidence_dir), target=target)
         if claim.kind == "replay":
             stored = store.stored_result(claim.run)
             if stored is not None:
                 stored.deduplicated, stored.run_id = True, claim.run["id"]
                 if claim.run.get("resolution") == "committed":
                     stored.committed = True  # a person confirmed against the target's records that it did take effect
-                return stored, Path(claim.run["evidence_dir"] or evidence_dir)
+                return Early(stored, Path(claim.run["evidence_dir"] or evidence_dir))
         if claim.kind != "new":
             existing = claim.run or {}
             result = _early_result(artifact, ReplayStatus.HARD_FAILURE, existing.get("id"),
                                    error=ReplayError(message=claim.reason, code="idempotency_conflict"))
-            return result, Path(existing.get("evidence_dir") or evidence_dir)
+            return Early(result, Path(existing.get("evidence_dir") or evidence_dir))
         run_id_ = claim.run["id"]
         if needs_approval:
             store.request_approval(run_id_, tier, requested_by)
             result = _early_result(artifact, ReplayStatus.PENDING_APPROVAL, run_id_, approval_tier=tier)
             _write_evidence(evidence_dir, artifact, params, result, policy, target, dry_run, note=f"waiting for a {tier} approval")
-            return result, evidence_dir
+            return Early(result, evidence_dir)
 
-    try:
-        result = _replay_in_browser(
-            artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
-            headed=headed, slow_mo=slow_mo, evidence_dir=evidence_dir, operator_port=operator_port,
-            enable_operator_console=enable_operator_console, dry_run=dry_run, deadline_s=deadline_s, cancel_event=cancel_event,
-            confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
-            policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
-        )
-    except Exception as exc:  # noqa: BLE001
-        # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
-        # stays "running" for ever and its idempotency key is blocked. Close it as a failure and report it as one.
-        result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=ReplayError(
-            code="runner_error", message=f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else exc}"))
-    result.run_id, result.approval_tier = run_id_, tier
-    store.finish(run_id_, result, str(evidence_dir))
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    redactor = Redactor.from_config(policy.redaction)
-    (evidence_dir / "result.json").write_text(json.dumps(redactor.scrub(json.loads(result.model_dump_json())), indent=2))
-    return result, evidence_dir
+    def execute(cancel_event_: threading.Event | None = None) -> ReplayResult:
+        store.mark_running(run_id_)
+        try:
+            result = _replay_in_browser(
+                artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
+                headed=headed, slow_mo=slow_mo, evidence_dir=evidence_dir, operator_port=operator_port,
+                enable_operator_console=enable_operator_console, dry_run=dry_run, deadline_s=deadline_s, cancel_event=cancel_event_ or cancel_event,
+                confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
+                policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
+            # stays "running" for ever and its idempotency key is blocked. Close it as a failure and report it as one.
+            result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=ReplayError(
+                code="runner_error", message=f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else exc}"))
+        result.run_id, result.approval_tier = run_id_, tier
+        store.finish(run_id_, result, str(evidence_dir))
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        redactor = Redactor.from_config(policy.redaction)
+        (evidence_dir / "result.json").write_text(json.dumps(redactor.scrub(json.loads(result.model_dump_json())), indent=2))
+        return result
+
+
+
+    return Prepared(run_id_, evidence_dir, execute)
 
 
 def _repair_hook(store: RunStore, run_id_: str, use_llm: bool):

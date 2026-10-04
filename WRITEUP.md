@@ -110,6 +110,26 @@ deadline and a cancel event are checked before every action and inside every bac
 threads that each own one Chromium, with a fresh isolated context per run. That keeps Playwright
 off request threads (incident 2) without launching a browser per run, and bounds concurrency.
 
+## Runtime and API decisions (phase 3a)
+
+**Async runs, one execution path.** `runtime.prepare_run` does everything that needs no browser (input validation, policy caps, the
+idempotency claim, the approval request, the run record) and returns either an early answer or a prepared run; `run_replay` executes it
+inline, and the v1 API hands it to `RunExecutor` and returns the run id at once. Concurrency is bounded by the browser pool, a run waits as
+`queued`, and `cancel` stops it between actions. A server that dies mid-run recovers on start: a run left running that could have issued an
+irreversible step becomes `needs_review`, anything else a failure, so neither blocks its idempotency key for ever.
+
+**Identity from the key, not from the caller.** v1 requests carry an API key (stored as a hash). Its name is the requester or approver and
+its role is the authority, so "who approved this" is no longer asserted by the request. A requester still cannot approve their own run.
+Forbidden (wrong role) and conflicting (already decided) are different HTTP statuses.
+
+**The caller does not choose where a run goes.** v1 accepts a target *name*, never a URL or credentials. The older synchronous endpoint
+refuses URL, credential and evidence-path overrides unless a test environment variable allows them.
+
+**Partial updates are a capability design, not an HTTP verb.** The contact update used to need every field because the engine backfilled any
+omitted optional input with an empty string, which would have blanked the field. Steps can now be conditional (`when_present`): an omitted
+or null input skips the step and the page keeps what it already holds; `at_least_one_of` demands that something be supplied. The recorder
+marks the steps for optional inputs itself, so a rediscovery produces this shape without hand-editing.
+
 ## Decisions and why
 
 **The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
@@ -205,7 +225,7 @@ Found while building phase 2 (each has a test):
     capabilities at drift level 2 and 0 of 7 at level 3 because unlabeled fields give no name to match
     on. The scoring was then changed to use position as the base signal. See the caveat under the table.
 
-Found by exercising the finished system by hand (each pinned in `tests/test_qa_regressions.py`):
+Found by exercising the finished system by hand (each pinned in `tests/test_qa_regressions.py` and `tests/test_edge_cases.py`):
 
 15. **One approval could be executed several times.** Four concurrent resumes of a single approved
     refund each launched a browser. Resume now claims the approved run atomically; exactly one wins.
@@ -222,6 +242,24 @@ Found by exercising the finished system by hand (each pinned in `tests/test_qa_r
     capability could be run against the wrong app (it hit an allowlist block instead of saying so), a
     failed login reported nothing useful, and the CLI printed Python tracebacks for an unknown
     capability or a bad resume. All fixed.
+
+Found by a second QA pass over every capability with edge cases and injected faults (about 100 cases; the money flows held up, including a
+lost response, a lost request, a 12s stall on the commit and a session expiring mid-run, always with exactly the expected state changes):
+
+21. **An input's allowed values were never enforced.** A reason that was not one of the listed options passed validation, then waited 8
+    seconds for a dropdown option that did not exist. Validation now checks `enum`, length and range, and selecting a missing option
+    fails at once and lists what is offered.
+22. **A request that could not run still reached an approver's queue.** An amount sent as a number was queued for supervisor approval and
+    only then failed validation. Validation now runs before policy, approval and the idempotency claim.
+23. **The chatbot invented values and the run went ahead.** Asked to change only a phone number, the model filled email and address with
+    "unknown", which can pass the target's own validation and be written to a record. Arguments are now checked against the schema and
+    placeholder words are refused with a question. (The root cause, no partial update, is fixed above.)
+24. **The chat page still described the previous target.** Its "required fields" table listed capabilities that do not exist here. It is now
+    built from the real artifacts.
+25. **Re-sending a field's current value read as a hard failure.** The target says "no changes were needed", which failed the success
+    checkpoint. It is now a `no_change` business outcome.
+26. **The unauthenticated endpoint would send a profile's credentials to any URL it was given, and write evidence to any path.** Both
+    overrides are now refused unless a test environment variable allows them.
 
 
 ## Measured: drift and repair
@@ -253,7 +291,7 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Platform behavior | 212 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities, repair and canary |
+| Platform behavior | 242 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases |
 | Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | A retried commit posts exactly once | `tests/test_clinic_capabilities.py`: same-key retry, response lost after commit, request lost before commit; all asserted on the clinic audit log with its own duplicate guard off |
 | An irreversible step is not retried on a guess | `tests/test_replay_hardening.py` (needs_review, RETRY rule ignored, session expiry at commit) |
@@ -267,9 +305,10 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 
 These are verified against the code as of this writing.
 
-- **Approver identity is asserted, not authenticated.** The API even takes `requested_by` from the request body. The roster in `safety/policy.yaml` is enforced
-  (right tier, not the requester), but nothing proves the caller is the person they name. Real
-  authentication is phase 3.
+- **Identity is authenticated on `/v1` only.** There, the API key supplies the name and role. The CLI still trusts the name you type
+  (checked against the roster in `safety/policy.yaml`), and the older `/capabilities/{id}/invoke`, the chatbot and the dashboard have no
+  authentication at all and take `requested_by` from the caller. They are replaced by the unified UI (phase 4), which will use `/v1`. Keys
+  are created from the CLI; there is no key rotation or expiry.
 - **The supervised commit gate has not been used by a person at a keyboard.** It is a terminal prompt;
   it was run once live against Gemini with the answers piped in (the approver landed in the artifact's
   provenance) and is otherwise tested with an injected answer function. The checked-in clinic artifacts were recorded with
@@ -298,11 +337,11 @@ These are verified against the code as of this writing.
 - **The browser pool does not cover everything.** Headed and slow-mo runs use a dedicated thread, a job
   that blocks forever holds its worker, and a paused escalation holds one until a human resumes.
   Tests print Playwright teardown noise at interpreter exit.
-- **Synchronous API, unauthenticated.** `/invoke` blocks until the run finishes, accepts `base_url`,
-  `evidence_dir` and credentials from the request body, and is for local use only. Chat history and
-  sessions are process memory. The operator console starts at import time on a fixed port.
-- **The chatbot is minimal.** Gemini only, no conversation memory, one capability per message, a
-  hand-maintained keyword guard, and a server-rendered page that polls.
+- **The older API and the chat are still in-process and synchronous.** Chat history is one global list in memory (every visitor shares
+  it and a restart clears it), the page reloads itself while a run is pending, which discards a half-typed message, and the chatbot runs
+  every clinic task as the front-desk account. The operator console starts at import time on a fixed port. v1 has no rate limiting.
+- **The chatbot is minimal.** Gemini only, no conversation memory, one capability per message, a keyword guard for the credit-union
+  capabilities plus the new schema and placeholder check, and a server-rendered page that polls. It cannot approve a run it submits.
 - **Clinic coverage.** Capabilities target the legacy skin only; the modern skin, the CSV export and the
   approvals queue have no capability. Browser tests cover search, contact update, reschedule, cancel,
   CSV download, session expiry, drift, duplicate submit and maintenance; the claim, refund, write-off and
@@ -313,6 +352,7 @@ These are verified against the code as of this writing.
 
 ## What is next
 
-Async, persisted runs with API-key auth and one unified UI (phase 3); a benchmark that reports success
+The rest of phase 3 (an MCP server exposing capabilities as tools with their risk metadata, structured logs, per-capability metrics and a
+Playwright trace per run); one unified UI over `/v1` with a task-first catalog, an operator inbox and chat as a secondary view (phase 4); a benchmark that reports success
 rate, recovery rate and discovery cost against zero-token replay; running the supervised gate and the LLM
 repair ranker live; deploying the clinic. None of these are claimed until they are built and measured.

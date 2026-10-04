@@ -1,5 +1,5 @@
 {
-  "current": "1.0.0",
+  "current": "1.1.0",
   "history": [
     {
       "action": "initial",
@@ -8,6 +8,14 @@
       "at": "2026-10-03T21:38:40+00:00",
       "by": "discovery",
       "reason": "discovery run discovery_run_20261003T213830Z"
+    },
+    {
+      "action": "promote",
+      "version": "1.1.0",
+      "from": "1.0.0",
+      "at": "2026-10-04T22:41:57+00:00",
+      "by": "discovery",
+      "reason": "discovery run discovery_run_20261004T224147Z"
     }
   ]
 }

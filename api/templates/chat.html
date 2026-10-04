@@ -54,20 +54,18 @@
   <a class="active" href="/chat">Chatbot</a>
 </nav>
 <h1>Capability Chatbot</h1>
-<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up the balance for member 10001"</em> or <em>"open a savings sub-account for member 10001 with a $50 deposit"</em>.</p>
+<p class="meta">A thin front door over the capability API -- <code>GET /capabilities</code> / <code>POST /capabilities/{id}/invoke</code>. Each message is evaluated fresh; try something self-contained, e.g. <em>"look up patient LK-100001"</em> or <em>"look up the balance for member 10001"</em>.</p>
 <p class="meta">If a request needs a human (an irreversible action, or something that got stuck), it pauses here -- keep the <a href="{{ operator_console_url }}" target="_blank" rel="noopener">operator console</a> open in another tab to catch it.</p>
 
 <details class="fields">
-  <summary>Required fields per capability -- include all of them, every time</summary>
+  <summary>What I can do, and what each task needs</summary>
   <table>
-    <tr><th>Capability</th><th>Required fields</th></tr>
-    <tr><td>Balance inquiry</td><td><code>member_id</code></td></tr>
-    <tr><td>Funds transfer</td><td><code>member_id</code>, <code>from_share</code>, <code>to_share</code>, <code>amount</code></td></tr>
-    <tr><td>Open share</td><td><code>member_id</code>, <code>share_type</code>, <code>initial_deposit</code></td></tr>
-    <tr><td>Update member</td><td><code>member_id</code>, <code>email</code>, <code>phone</code>, <code>address</code> -- all four, even to change just one</td></tr>
-    <tr><td>Place hold</td><td><code>member_id</code>, <code>share</code>, <code>reason_code</code></td></tr>
+    <tr><th>Task</th><th>Needs</th></tr>
+    {% for c in capabilities %}
+    <tr><td>{{ c.name }}</td><td>{% for f in c.required %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% if c.optional %} <span style="color:#888">(optional: {% for f in c.optional %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %})</span>{% endif %}</td></tr>
+    {% endfor %}
   </table>
-  <p style="margin:8px 0 0;color:#888;">A message missing a required field gets declined with a plain-text reply asking for it, instead of silently running the wrong capability.</p>
+  <p style="margin:8px 0 0;color:#888;">Anything a task needs that isn't in your message gets a question back, never a guess. Tasks that commit something (a refund, a cancellation, a write-off) wait for a recorded approval first.</p>
 </details>
 
 <div class="transcript">

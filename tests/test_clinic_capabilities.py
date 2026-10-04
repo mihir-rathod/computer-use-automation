@@ -227,3 +227,61 @@ def test_an_approved_run_cannot_be_resumed_as_a_different_account(world, tmp_pat
     decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "dana.okafor", "ok")
     with pytest.raises(ValueError, match="requested for target 'clinic'"):
         run(world, first.capability_id, {}, tmp_path, target="clinic_supervisor", resume_run_id=first.run_id)
+
+
+# ---- partial updates ---------------------------------------------------------------------------------
+
+def patient(base, patient_id=2):
+    c = httpx.Client(base_url=base)
+    c.post("/api/auth/login", json={"username": "frontdesk", "password": "desk-demo-123"})
+    return c.get(f"/api/patients/{patient_id}").json()["patient"]
+
+
+def test_updating_only_the_phone_leaves_email_and_address_untouched(world, tmp_path):
+    """The point of partial updates: change one field without re-sending (or wiping) the others."""
+    base, _ = world
+    before = patient(base)
+
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "phone": "206-555-0188"}, tmp_path)
+
+    assert res.status == ReplayStatus.SUCCESS, res.error
+    assert res.steps_skipped == ["s7", "s8"]  # the email and address steps were not run
+    after = patient(base)
+    assert after["phone"] == "(206) 555-0188"
+    assert (after["email"], after["address"]) == (before["email"], before["address"])
+    assert len(effects(base, "patient.update_contact")) == 1
+
+
+def test_each_single_field_and_each_pair_works(world, tmp_path):
+    base, _ = world
+    run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "email": "only.email@example.test"}, tmp_path)
+    run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "address": "77 Cedar Way, Oakridge, WA 98021"}, tmp_path)
+    now = patient(base)
+    assert now["email"] == "only.email@example.test" and now["address"] == "77 Cedar Way, Oakridge, WA 98021"
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "phone": "206-555-0101", "email": "pair@example.test"}, tmp_path)
+    assert res.steps_skipped == ["s8"]
+    assert patient(base)["address"] == "77 Cedar Way, Oakridge, WA 98021"
+
+
+def test_supplying_no_field_is_rejected_before_anything_runs(world, tmp_path):
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002"}, tmp_path)
+    assert res.status == ReplayStatus.HARD_FAILURE and res.error.code == "input_invalid" and "at least one of" in res.error.message
+
+
+def test_null_means_leave_alone_and_empty_string_is_refused_not_applied(world, tmp_path):
+    base, _ = world
+    before = patient(base)
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "phone": "206-555-0110", "email": None, "address": None}, tmp_path)
+    assert res.status == ReplayStatus.SUCCESS and res.steps_skipped == ["s7", "s8"]
+    assert patient(base)["email"] == before["email"]
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "phone": "206-555-0111", "address": ""}, tmp_path)
+    assert res.error.code == "input_invalid"  # blanking a field is not something this capability does
+
+
+def test_resending_the_current_values_is_a_no_change_outcome_not_a_failure(world, tmp_path):
+    """Found by the QA pass: 'NO CHANGES WERE NEEDED' failed the success checkpoint and read as a hard failure."""
+    base, _ = world
+    current = patient(base)
+    res, _ = run(world, "clinic.update_patient_contact", {"mrn": "LK-100002", "email": current["email"]}, tmp_path)
+    assert res.status == ReplayStatus.BUSINESS_OUTCOME and res.business_outcome == "no_change"
+    assert effects(base, "patient.update_contact") == []

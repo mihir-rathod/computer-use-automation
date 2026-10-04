@@ -26,3 +26,21 @@ def sign_in(page, base: str, user: str = "frontdesk", password: str = "desk-demo
     page.locator('input[name="password"]').fill(password)
     page.get_by_role("button", name="Sign In").click()
     page.get_by_text("Main menu").first.wait_for()
+
+
+def copy_artifacts(dst) -> "Path":
+    """A working copy of the checked-in artifacts with only each capability's current version, so a test's idea of "the next
+    version" does not depend on how many unpromoted candidates a developer's own discovery runs have left in the repo."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "artifacts"
+    out = Path(dst) / "artifacts"
+    shutil.copytree(src, out, ignore=shutil.ignore_patterns("mockbank.*"))
+    for folder in out.iterdir():
+        index = json.loads((folder / "index.json").read_text())
+        for version_file in folder.glob("*.json"):
+            if version_file.name != "index.json" and version_file.stem != index["current"]:
+                version_file.unlink()
+    return out

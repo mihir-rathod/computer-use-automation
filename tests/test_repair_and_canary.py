@@ -19,7 +19,7 @@ from repair.propose import RepairProposal
 from replay.result import ReplayStatus
 from runs.store import ApprovalError
 from safety.config import PolicyConfig
-from tests.clinic_support import effects, reset
+from tests.clinic_support import copy_artifacts, effects, reset
 
 REAL_ARTIFACTS = Path(__file__).resolve().parent.parent / "artifacts"
 LOOKUP = {"mrn": "LK-100002"}
@@ -27,8 +27,7 @@ LOOKUP = {"mrn": "LK-100002"}
 
 @pytest.fixture
 def arts(tmp_path) -> Path:
-    shutil.copytree(REAL_ARTIFACTS, tmp_path / "artifacts", ignore=shutil.ignore_patterns("mockbank.*"))
-    return tmp_path / "artifacts"
+    return copy_artifacts(tmp_path)
 
 
 @pytest.fixture

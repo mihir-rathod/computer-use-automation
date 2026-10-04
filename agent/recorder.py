@@ -76,7 +76,8 @@ def _synthesize_checkpoint(recorded: RecordedAction, parameters: dict[str, str])
     return None
 
 
-def _build_step(step_id: str, recorded: RecordedAction, parameters: dict[str, str], classifier: RiskClassifier = _risk_classifier) -> Step:
+def _build_step(step_id: str, recorded: RecordedAction, parameters: dict[str, str], classifier: RiskClassifier = _risk_classifier,
+                optional_inputs: frozenset[str] = frozenset()) -> Step:
     action = recorded.action
     target = recorded.result.resolved_target
     params = {k: (_parameterize(v, parameters) if isinstance(v, str) else v) for k, v in action.params.items()}
@@ -85,8 +86,11 @@ def _build_step(step_id: str, recorded: RecordedAction, parameters: dict[str, st
         semantic_description=target.semantic_description if target else None,
         current_path=urlsplit(recorded.observed_before.url).path,
     )
+    only = re.fullmatch(r"\{\{(\w+)\}\}", str(params.get("text", params.get("value", ""))))
+    when_present = only.group(1) if only and action.kind in (ActionType.TYPE, ActionType.SELECT) and only.group(1) in optional_inputs else None
     return Step(
         step_id=step_id,
+        when_present=when_present,
         action=action.kind,
         target=target,
         params=params,
@@ -123,7 +127,8 @@ def build_artifact(
             f"cannot build an artifact from a discovery run that did not finish successfully "
             f"(stop_reason={result.stop_reason!r}, reasoning={result.reasoning!r})"
         )
-    steps = [_build_step(f"s{i + 1}", recorded, parameters, risk_classifier or _risk_classifier) for i, recorded in enumerate(result.transcript)]
+    optional_inputs = frozenset(k for k in input_schema.properties if k not in input_schema.required)
+    steps = [_build_step(f"s{i + 1}", recorded, parameters, risk_classifier or _risk_classifier, optional_inputs) for i, recorded in enumerate(result.transcript)]
     approvals = [
         CommitApproval(step_id=f"s{i + 1}", approver=r.commit_approval.approver or "unknown", mode=r.commit_approval.mode, at=datetime.now(UTC))
         for i, r in enumerate(result.transcript) if r.commit_approval is not None and r.commit_approval.approved

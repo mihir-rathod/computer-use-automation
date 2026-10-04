@@ -49,11 +49,11 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 | `replay/` | Deterministic replay engine, templating, input validation, result types |
 | `surface/` | Surface interface and the Playwright implementation, aria parsing, locator resolution, browser pool |
 | `safety/` | Allowlist, risk classifier, combined policy, and `policy.yaml` (approvals, caps, redaction) |
-| `runs/` | SQLite run store: runs, idempotency keys, approvals, repair proposals, canary history |
+| `runs/` | SQLite run store (runs, idempotency keys, approvals, repair proposals, canary history, API keys) and the async run executor |
 | `repair/` | Locator repair proposals and their approval |
 | `escalation/` | Pause/resume session manager and the operator console |
 | `evidence_lib/` | JSONL evidence logger and redaction |
-| `api/` | Capability API, chatbot, run dashboard |
+| `api/` | `v1.py` (authenticated async API), the older capability endpoint, chatbot, run dashboard |
 | `mockbank/` | Bundled legacy-style bank app used as a test target |
 | `clinic/` | Larkspur Clinic Ops: the self-hosted test target (legacy and React skins, JSON API, test kit) |
 | `artifacts/` | Saved capability artifacts, one directory per capability with every version and a promotion history |
@@ -101,6 +101,34 @@ uv run python cli.py replay --capability mockbank.member_balance_lookup --param 
 ```
 
 MockBank's demo login is `operator` / `bankdemo123` (a fixture credential, not a secret).
+
+### The v1 API
+
+`/v1` is the authenticated, asynchronous API (interactive docs at `/docs`). Identity comes from an API key: its name is
+recorded as the requester or approver, and its role (`viewer`, `operator`, `supervisor`, `admin`) decides what it may do.
+
+```bash
+uv run python cli.py keys create --name alex --role operator       # shown once; only a hash is stored
+uv run python cli.py keys create --name dana.okafor --role supervisor
+```
+
+```bash
+# submit: returns 202 and a run id at once; follow it with GET /v1/runs/{id} or the SSE stream
+curl -s -X POST localhost:8020/v1/runs -H "Authorization: Bearer $ALEX" -H "Idempotency-Key: refund-INV-30001-1" \
+  -H 'content-type: application/json' \
+  -d '{"capability_id":"clinic.issue_refund","target":"clinic","params":{"invoice":"INV-30001","amount":"25.00","reason":"duplicate_payment"}}'
+curl -N localhost:8020/v1/runs/RUN_ID/events -H "Authorization: Bearer $ALEX"
+# a supervisor (a different key from the requester) approves; the run starts straight away
+curl -s -X POST localhost:8020/v1/runs/RUN_ID/approve -H "Authorization: Bearer $DANA" -H 'content-type: application/json' -d '{"reason":"invoice checked"}'
+```
+
+Other endpoints: `/v1/capabilities` (schemas, risk metadata, policy tier, canary state), `/v1/approvals`, `/v1/runs/{id}/cancel|reject|resolve`,
+`/v1/repairs`, `/v1/artifacts/{id}/versions|diff|promote|rollback`, `/v1/targets`, `/v1/me`, `/v1/health`. The caller never supplies a
+URL or credentials; the target profile decides. The older `POST /capabilities/{id}/invoke` (used by the chatbot and dashboard until
+the unified UI replaces them) is unauthenticated and synchronous, and now refuses URL, credential and evidence-path overrides.
+
+**Partial updates.** An update capability can mark individual fields optional (`when_present` steps and `at_least_one_of` inputs):
+`clinic.update_patient_contact` takes an MRN plus any of phone, email, address, and leaves the fields you do not send exactly as they were.
 
 ### Operating the clinic capabilities
 
@@ -173,7 +201,7 @@ uv run pytest
 The suite is offline: it starts MockBank and the clinic app in-process and drives a real Chromium
 against them. The live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY`
 is set, and the modern-skin browser tests skip until `clinic/modern` has been built.
-At the time of writing: 274 passing, 4 skipped without a key. The suite takes about five minutes
+At the time of writing: 304 passing, 4 skipped without a key. The suite takes about five minutes
 because it drives a real browser, including a full drift-repair loop.
 
 ## What is not done yet

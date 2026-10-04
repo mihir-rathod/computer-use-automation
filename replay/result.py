@@ -45,6 +45,7 @@ class ReplayResult(BaseModel):
     business_outcome: str | None = None
     error: ReplayError | None = None
     steps_completed: list[str] = Field(default_factory=list)
+    steps_skipped: list[str] = Field(default_factory=list, description="Conditional steps skipped because their optional input was not supplied.")
     escalated: bool = Field(
         default=False, description="A human paused and acted via the operator console during this run."
     )
