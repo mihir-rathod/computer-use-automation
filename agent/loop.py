@@ -19,11 +19,13 @@ from typing import Literal
 
 from google.genai import types
 
+from agent.commit_gate import CommitDecision, CommitGate, describe_request
 from agent.gemini_client import GeminiClient
 from agent.tools import ALL_TOOLS, ToolCall, is_terminal, to_action
 from artifacts_lib.schema import ActionType
 from escalation.session_manager import SessionCancelled, SessionManager
 from evidence_lib.logger import EvidenceLogger
+from evidence_lib.redaction import is_sensitive_field
 from surface.base import Action, ActionResult, ObservedState, Surface
 
 DEFAULT_MAX_STEPS = 25
@@ -53,6 +55,7 @@ class RecordedAction:
     observed_before: ObservedState
     observed_after: ObservedState | None = None
     output_name: str | None = None
+    commit_approval: CommitDecision | None = None  # set when a person authorised this irreversible action
 
 
 @dataclass
@@ -72,8 +75,14 @@ class DiscoveryLoop:
         max_steps: int = DEFAULT_MAX_STEPS,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         session_manager: SessionManager | None = None,
+        commit_gate: CommitGate | None = None,
+        capability_id: str | None = None,
     ):
         self.surface = surface
+        # Asked, instead of failing the step, when the safety policy blocks an irreversible action. No gate
+        # means the old behaviour: the block is reported back to the model and discovery cannot commit.
+        self.commit_gate = commit_gate
+        self.capability_id = capability_id
         self.gemini_client = gemini_client
         self.evidence_logger = evidence_logger
         self.max_steps = max_steps
@@ -83,7 +92,7 @@ class DiscoveryLoop:
         # instead of just returning a failed DiscoveryResult.
         self.session_manager = session_manager
 
-    def run(self, goal: str, parameters: dict[str, str], start_path: str | None = None) -> DiscoveryResult:
+    def run(self, goal: str, parameters: dict[str, str], start_path: str | None = None, output_names: list[str] | None = None) -> DiscoveryResult:
         """`start_path`, if given, is navigated to explicitly *before* the model takes over --
         recorded as the transcript's first entry, not left to chance. Without this, a
         discovered artifact only works by accident: if the browser happened to already be on
@@ -98,7 +107,7 @@ class DiscoveryLoop:
         transcript: list[RecordedAction] = []
         recent_calls: list[str] = []
         contents: list[types.Content] = [
-            types.Content(role="user", parts=[types.Part.from_text(text=self._initial_prompt(goal, parameters))])
+            types.Content(role="user", parts=[types.Part.from_text(text=self._initial_prompt(goal, parameters, output_names))])
         ]
 
         if start_path is not None:
@@ -129,7 +138,7 @@ class DiscoveryLoop:
             tool_call = ToolCall(name=call_part.function_call.name, args=dict(call_part.function_call.args))
 
             if self.evidence_logger is not None:
-                self.evidence_logger.log("agent", "decide", tool=tool_call.name, args=tool_call.args, step=step_index)
+                self.evidence_logger.log("agent", "decide", tool=tool_call.name, args=self._loggable_args(tool_call, observed), step=step_index)
 
             # Dead-end: the exact same tool call (name + args) repeated back to back -- e.g.
             # clicking a ref that isn't doing anything. Deliberately NOT "did the page state
@@ -148,9 +157,25 @@ class DiscoveryLoop:
             action = to_action(tool_call)
             action.actor = "agent"
             result = self.surface.act(action)
+            if result.applied_params:
+                action.params.update(result.applied_params)  # record what was really applied, so the recorder parameterizes the real value
+            approval: CommitDecision | None = None
+            if result.blocked == "irreversible_unconfirmed" and self.commit_gate is not None:
+                request = describe_request(action, observed, self.capability_id, goal)
+                decision = self.commit_gate(request)
+                if self.evidence_logger is not None:
+                    self.evidence_logger.log("human" if decision.mode == "supervised" else "system", "commit_decision",
+                                             approved=decision.approved, approver=decision.approver, mode=decision.mode,
+                                             element=request.description, url=request.url)
+                if decision.approved:
+                    action.confirmed = True
+                    result = self.surface.act(action)
+                    approval = decision
+                else:
+                    result.error = "the supervisor declined this irreversible step; do not retry it -- finish or give_up"
             transcript.append(RecordedAction(
                 action=action, result=result, observed_before=observed,
-                output_name=tool_call.args.get("output_name"),
+                output_name=tool_call.args.get("output_name"), commit_approval=approval,
             ))
 
             contents.append(types.Content(role="user", parts=[types.Part.from_function_response(
@@ -159,6 +184,15 @@ class DiscoveryLoop:
             )]))
 
         return self._finish(transcript, "max_steps", None)
+
+    @staticmethod
+    def _loggable_args(tool_call: ToolCall, observed: ObservedState) -> dict:
+        """Typed text goes into evidence, so a value typed into a password-like field must not."""
+        if tool_call.name != "type_text":
+            return tool_call.args
+        element = next((e for e in observed.elements if e.ref == tool_call.args.get("ref")), None)
+        label = " ".join(filter(None, [element.name if element else None, element.html_name if element else None]))
+        return {**tool_call.args, "text": "***REDACTED***"} if is_sensitive_field(label) else tool_call.args
 
     def _finish(self, transcript: list[RecordedAction], stop_reason: StopReason, reasoning: str | None) -> DiscoveryResult:
         if transcript and transcript[-1].observed_after is None:
@@ -181,6 +215,10 @@ class DiscoveryLoop:
 
         return DiscoveryResult(stop_reason=stop_reason, reasoning=reasoning, transcript=transcript, escalated=escalated)
 
-    def _initial_prompt(self, goal: str, parameters: dict[str, str]) -> str:
+    def _initial_prompt(self, goal: str, parameters: dict[str, str], output_names: list[str] | None = None) -> str:
         param_lines = "\n".join(f"- {k} = {v!r}" for k, v in parameters.items()) or "(none)"
-        return f"Goal: {goal}\n\nUse these exact parameter values where the goal calls for them:\n{param_lines}"
+        prompt = f"Goal: {goal}\n\nUse these exact parameter values where the goal calls for them:\n{param_lines}"
+        if output_names:
+            prompt += ("\n\nWhen you extract() a value, use exactly one of these output_name values (no others, no variations): "
+                       + ", ".join(output_names))
+        return prompt

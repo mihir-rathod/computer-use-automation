@@ -1,0 +1,616 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.update_patient_contact",
+  "version": "1.0.0",
+  "name": "Update a patient's contact details",
+  "description": "Replaces a patient's phone, email and address.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "mrn": {
+        "type": "string",
+        "pattern": "^LK-[0-9]{6}$"
+      },
+      "phone": {
+        "type": "string"
+      },
+      "email": {
+        "type": "string"
+      },
+      "address": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "mrn",
+      "phone",
+      "email",
+      "address"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "updated",
+          "not_found",
+          "validation_error"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "CONTACT INFORMATION UPDATED",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/patients"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/patients",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field mrn)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#mrn",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='mrn']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 3,
+          "before": [
+            "Patient lookup",
+            "MRN"
+          ],
+          "after": [
+            "Last name",
+            "Date of birth"
+          ],
+          "html_name": "mrn",
+          "id": "mrn"
+        }
+      },
+      "params": {
+        "text": "{{mrn}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{mrn}}",
+        "target": {
+          "semantic_description": "textbox (form field mrn)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "#mrn",
+              "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='mrn']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 3,
+            "before": [
+              "Patient lookup",
+              "MRN"
+            ],
+            "after": [
+              "Last name",
+              "Date of birth"
+            ],
+            "html_name": "mrn",
+            "id": "mrn"
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Search",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Search']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Search",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Date of birth",
+            "(YYYY-MM-DD)"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Select",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "link[name='Select']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "link",
+          "name": "Select",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "1972-06-12",
+            "Cascade Mutual"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/patients/*",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "click",
+      "target": {
+        "semantic_description": "Update contact",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "link[name='Update contact']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "link",
+          "name": "Update contact",
+          "ordinal": 1,
+          "same_role_count": 9,
+          "before": [
+            "Balance due",
+            "$124.00"
+          ],
+          "after": [
+            "APPOINTMENTS",
+            "Appt no."
+          ],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/patients/*/contact",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field phone)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='phone']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 3,
+          "before": [
+            "Update contact information",
+            "Phone"
+          ],
+          "after": [
+            "Email",
+            "Address"
+          ],
+          "html_name": "phone",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{phone}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{phone}}",
+        "target": {
+          "semantic_description": "textbox (form field phone)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='phone']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 3,
+            "before": [
+              "Update contact information",
+              "Phone"
+            ],
+            "after": [
+              "Email",
+              "Address"
+            ],
+            "html_name": "phone",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field email)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='email']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 1,
+          "same_role_count": 3,
+          "before": [
+            "Phone",
+            "Email"
+          ],
+          "after": [
+            "Address",
+            "Save changes"
+          ],
+          "html_name": "email",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{email}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{email}}",
+        "target": {
+          "semantic_description": "textbox (form field email)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='email']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 1,
+            "same_role_count": 3,
+            "before": [
+              "Phone",
+              "Email"
+            ],
+            "after": [
+              "Address",
+              "Save changes"
+            ],
+            "html_name": "email",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s8",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field address)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='address']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 2,
+          "same_role_count": 3,
+          "before": [
+            "Email",
+            "Address"
+          ],
+          "after": [
+            "Save changes",
+            "Back"
+          ],
+          "html_name": "address",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{address}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{address}}",
+        "target": {
+          "semantic_description": "textbox (form field address)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='address']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 2,
+            "same_role_count": 3,
+            "before": [
+              "Email",
+              "Address"
+            ],
+            "after": [
+              "Save changes",
+              "Back"
+            ],
+            "html_name": "address",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s9",
+      "action": "click",
+      "target": {
+        "semantic_description": "Save changes",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Save changes']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Save changes",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Address"
+          ],
+          "after": [
+            "Back"
+          ],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "No patients matched your search",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Please correct the following",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "APPLICATION ERROR",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 2,
+        "backoff_ms": 300,
+        "backoff_multiplier": 2.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "YOUR SESSION HAS TIMED OUT",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261003T213830Z",
+    "created_at": "2026-10-03T21:38:40.121766Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "updated"
+  },
+  "canary": null
+}

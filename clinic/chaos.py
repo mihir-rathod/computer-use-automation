@@ -16,7 +16,9 @@ from starlette.requests import Request
 
 from clinic.audit import Actor
 
-KINDS = {"latency", "error500", "maintenance", "expire_session", "rate_limit"}
+# error500_after runs the request to completion and then answers 500: the state change happened but
+# the client is told it failed, which is exactly the case that causes double-posts on a blind retry.
+KINDS = {"latency", "error500", "error500_after", "maintenance", "expire_session", "rate_limit"}
 CHAOS_PREFIXES = ("/legacy", "/api")
 
 
@@ -107,6 +109,7 @@ class ChaosMiddleware(BaseHTTPMiddleware):
         world = request.app.state.world
         fired = world.chaos.take(request.method, path)
         is_api = path.startswith("/api")
+        after = [r for r in fired if r.kind == "error500_after"]
         for rule in fired:
             world.chaos.log.append({"rule": rule.id, "kind": rule.kind, "method": request.method, "path": path})
             world.audit.record(Actor.anonymous("chaos", request.state.request_id), f"chaos.{rule.kind}", "chaos",
@@ -122,6 +125,8 @@ class ChaosMiddleware(BaseHTTPMiddleware):
                 if is_api:
                     return JSONResponse({"error": "internal_error", "message": "Application error", "reference": ref}, status_code=500)
                 return _html_page("APPLICATION ERROR", f"<p>An unexpected error occurred.</p><p>Reference: {ref}</p>", 500)
+            elif rule.kind == "error500_after":
+                pass  # applied below, after the request has been served
             elif rule.kind == "maintenance":
                 if is_api:
                     return JSONResponse({"error": "maintenance", "message": "Scheduled maintenance in progress"}, status_code=503)
@@ -133,4 +138,10 @@ class ChaosMiddleware(BaseHTTPMiddleware):
                     return JSONResponse({"error": "rate_limited", "message": "Too many requests"}, status_code=429,
                                         headers={"Retry-After": "30"})
                 return _html_page("TOO MANY REQUESTS", "<p>Please wait a moment and try again.</p>", 429)
-        return await call_next(request)
+        response = await call_next(request)
+        if after:
+            ref = f"ERR-{uuid.uuid4().hex[:8].upper()}"
+            if is_api:
+                return JSONResponse({"error": "internal_error", "message": "Application error", "reference": ref}, status_code=500)
+            return _html_page("APPLICATION ERROR", f"<p>An unexpected error occurred.</p><p>Reference: {ref}</p>", 500)
+        return response

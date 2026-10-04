@@ -44,6 +44,11 @@ _DOMAIN_KEYWORDS = ("transfer", "withdraw", "close account")
 
 
 class RiskClassifier:
+    def __init__(self, extra_commit: tuple[str, ...] | list[str] = (), extra_domain: tuple[str, ...] | list[str] = ()):
+        """Extra keywords come from safety/policy.yaml; they add to the built-in lists, never replace them."""
+        self._commit = _COMMIT_KEYWORDS + tuple(k.lower() for k in extra_commit)
+        self._domain = _DOMAIN_KEYWORDS + tuple(k.lower() for k in extra_domain)
+
     def classify(
         self,
         action_type: ActionType,
@@ -54,8 +59,8 @@ class RiskClassifier:
             return StepRiskLevel.SAFE
         description = (semantic_description or "").lower()
         haystack = f"{description} {current_path or ''}".lower()
-        if any(keyword in haystack for keyword in _COMMIT_KEYWORDS):
+        if any(keyword in haystack for keyword in self._commit):
             return StepRiskLevel.IRREVERSIBLE
-        if any(keyword in description for keyword in _DOMAIN_KEYWORDS):
+        if any(keyword in description for keyword in self._domain):
             return StepRiskLevel.IRREVERSIBLE
         return StepRiskLevel.SAFE

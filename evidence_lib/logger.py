@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
+from evidence_lib.redaction import Redactor
+
 
 @dataclass
 class EvidenceEvent:
@@ -20,13 +22,16 @@ class EvidenceEvent:
 
 
 class EvidenceLogger:
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path, redactor: Redactor | None = None):
+        self.redactor = redactor
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.run_dir / "log.jsonl"
         self._fh = self.path.open("a", encoding="utf-8")
 
     def log(self, actor: str, event_type: str, **data: Any) -> None:
+        if self.redactor is not None:
+            data = self.redactor.scrub(data)
         event = EvidenceEvent(ts=time.time(), actor=actor, event_type=event_type, data=data)
         self._fh.write(json.dumps(asdict(event), default=str) + "\n")
         self._fh.flush()

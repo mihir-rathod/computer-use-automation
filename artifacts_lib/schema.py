@@ -55,6 +55,12 @@ class Target(BaseModel):
     """
     semantic_description: str
     locators: list[Locator]
+    hints: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Facts recorded at discovery time that are not locators but help find the element "
+                     "again when every locator breaks: its position among same-role elements and the names "
+                     "of its neighbours. Used only to rank repair proposals, never to act.",
+    )
 
     @field_validator("locators")
     @classmethod
@@ -243,6 +249,7 @@ class RecoverableRule(BaseModel):
     action: RecoveryAction
     max_attempts: int = 1
     backoff_ms: int = 0
+    backoff_multiplier: float = Field(default=1.0, ge=1.0, description="Each further attempt waits backoff_ms * multiplier**n.")
     recovery_target: Target | None = Field(
         default=None,
         description="Element to act on for the recovery itself -- e.g. a dialog's dismiss "
@@ -291,12 +298,31 @@ class SafetyMeta(BaseModel):
     )
 
 
+class CommitApproval(BaseModel):
+    """Who approved recording an irreversible step, and how."""
+    step_id: str
+    approver: str
+    mode: Literal["supervised", "auto_sandbox"]
+    at: datetime
+
+
 class Provenance(BaseModel):
     discovered_by: str = Field(description="Model id (e.g. a Gemini model id), or 'hand_written' for fixtures.")
     discovery_run_id: str
     created_at: datetime
     reviewed: bool = False
     note: str | None = None
+    parent_version: str | None = Field(default=None, description="The version this one was derived from (repairs).")
+    approved_by: str | None = None
+    change_note: str | None = None
+    repair_proposal_id: str | None = None
+    commit_approvals: list[CommitApproval] = Field(default_factory=list)
+
+
+class CanarySpec(BaseModel):
+    """A known-good invocation used by scheduled canary replays to catch UI drift early."""
+    params: dict[str, Any] = Field(default_factory=dict)
+    expect: dict[str, Any] = Field(default_factory=dict, description="Output fields that must equal these values.")
 
 
 # --------------------------------------------------------------------------------------
@@ -338,6 +364,7 @@ class Artifact(BaseModel):
                      "success_checkpoint rather than a business outcome -- e.g. {'status': "
                      "'found'}. Keeps the replay engine generic instead of hardcoding a field name.",
     )
+    canary: CanarySpec | None = None
 
     @field_validator("capability_id")
     @classmethod

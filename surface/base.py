@@ -26,6 +26,7 @@ class ObservedElement:
     value: str | None = None
     options: list[str] | None = None  # combobox only: available option labels
     state: dict[str, str] = field(default_factory=dict)  # raw aria flags, e.g. {"disabled": ""}
+    html_name: str | None = None  # the form field's `name` attribute, read only for controls with no accessible name
 
 
 @dataclass
@@ -43,6 +44,8 @@ class ObservedState:
             lines.append("  (none)")
         for el in self.elements:
             label = f'{el.role} "{el.name}"' if el.name else el.role
+            if not el.name and el.html_name:
+                label += f' (unlabeled form field name="{el.html_name}")'
             suffix = ""
             if el.value:
                 suffix += f" = {el.value!r}"
@@ -75,6 +78,10 @@ class ActionResult:
     resolved_strategy: LocatorStrategy | None = None
     extracted_value: str | None = None
     error: str | None = None
+    dispatched: bool = False  # a state-affecting action was issued; it may have reached the target even if success is False
+    applied_params: dict[str, Any] | None = None  # params as the surface actually applied them (e.g. a select option's real value)
+    unresolved: bool = False  # no locator in the target's chain matched an element on the page
+    blocked: str | None = None  # "allowlist" | "irreversible_unconfirmed": refused before anything was issued
 
 
 class Surface(ABC):

@@ -24,6 +24,12 @@ from mockbank.app import app as mockbank_app
 load_dotenv()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_run_store(tmp_path, monkeypatch):
+    """Every test gets its own run database, so runs recorded by one never dedupe or cap another."""
+    monkeypatch.setenv("RUN_DB_PATH", str(tmp_path / "runs.db"))
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -109,3 +115,54 @@ def login(page, base_url: str, next_path: str = "/search") -> None:
     page.get_by_role("textbox", name="Password").fill("bankdemo123")
     page.get_by_role("button", name="Log In").click()
     page.wait_for_url(f"**{next_path}")
+
+
+@pytest.fixture(scope="session")
+def clinic_base_url():
+    """The Larkspur Clinic target in-process on a free port, for platform tests that replay against it."""
+    from clinic.app import create_app
+    from clinic.settings import Settings
+
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(create_app(Settings()), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            httpx.get(f"{base_url}/healthz", timeout=0.5)
+            break
+        except httpx.ConnectError:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError("clinic test server did not start in time")
+    yield base_url
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture
+def clinic(clinic_base_url):
+    """The clinic reset to its seed, with the target's own duplicate guard off."""
+    from tests.clinic_support import reset
+
+    reset(clinic_base_url)
+    return clinic_base_url
+
+
+@pytest.fixture
+def signed_in(page, clinic):
+    from tests.clinic_support import sign_in
+
+    sign_in(page, clinic)
+    return page
+
+
+@pytest.fixture
+def params(clinic, clinic_base_url):
+    """Inputs for a small refund against the seeded paid invoice."""
+    import httpx
+
+    fixtures = httpx.get(f"{clinic_base_url}/_test/fixtures", timeout=5).json()
+    return {"invoice": fixtures["standard"]["refundable_invoice"], "amount": "20.00", "reason": "duplicate_payment"}

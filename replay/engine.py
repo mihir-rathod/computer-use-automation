@@ -13,6 +13,7 @@ read as the former (a real answer), not endlessly retried.
 """
 from __future__ import annotations
 
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -23,6 +24,7 @@ from artifacts_lib.schema import (
     RecoverableRule,
     RecoveryAction,
     Step,
+    StepRiskLevel,
 )
 from artifacts_lib.storage import DEFAULT_ARTIFACTS_DIR, load_artifact_by_id
 from escalation.session_manager import SessionCancelled, SessionManager
@@ -35,6 +37,10 @@ from surface.base import Action, Surface
 
 MAX_RECOVERY_ATTEMPTS_PER_STEP = 5
 MAX_ARTIFACT_RESTARTS = 1
+# How long a step/success checkpoint may take to become true after the action and the surface's own
+# settle wait. Polling, not sleeping: a checkpoint that is already true costs nothing.
+DEFAULT_CHECKPOINT_TIMEOUT_S = 1.5
+CHECKPOINT_POLL_S = 0.1
 
 
 class _RestartArtifact(Exception):
@@ -47,6 +53,19 @@ class _BusinessOutcome(Exception):
         self.outcome = outcome
         self.output_field = output_field
         self.steps_completed = steps_completed
+
+
+class _NeedsReview(Exception):
+    def __init__(self, error: ReplayError, steps_completed: list[str]):
+        self.error = error
+        self.steps_completed = steps_completed
+
+
+class _DryRunStop(Exception):
+    def __init__(self, step_id: str, steps_completed: list[str], outputs: dict[str, Any]):
+        self.step_id = step_id
+        self.steps_completed = steps_completed
+        self.outputs = outputs
 
 
 class _HardFailure(Exception):
@@ -63,8 +82,27 @@ class ReplayEngine:
         artifacts_dir: Any = DEFAULT_ARTIFACTS_DIR,
         reauth_credentials: dict[str, str] | None = None,
         session_manager: SessionManager | None = None,
+        *,
+        deadline_s: float | None = None,
+        cancel_event: threading.Event | None = None,
+        dry_run: bool = False,
+        confirmed_steps: set[str] | frozenset[str] = frozenset(),
+        checkpoint_timeout_s: float = DEFAULT_CHECKPOINT_TIMEOUT_S,
     ):
         self.surface = surface
+        # Whole-run budget, checked before every action and inside every recovery wait. It cannot
+        # interrupt an action already in flight (that is bounded by the page's own action timeout),
+        # and it is never checked between an irreversible step and its verification.
+        self.deadline_s = deadline_s
+        self.cancel_event = cancel_event
+        self.dry_run = dry_run
+        # Step ids a human or approval flow has authorised to commit. Only these steps get
+        # Action.confirmed=True; the safety policy blocks every other irreversible step.
+        self.confirmed_steps = frozenset(confirmed_steps)
+        self.checkpoint_timeout_s = checkpoint_timeout_s
+        self._deadline_at: float | None = None
+        self._commit_step: str | None = None  # irreversible step issued (ambiguous or confirmed)
+        self._committed = False
         self.evidence_logger = evidence_logger
         self.artifacts_dir = artifacts_dir
         self.reauth_credentials = reauth_credentials
@@ -83,11 +121,15 @@ class ReplayEngine:
 
     def run(self, artifact: Artifact, inputs: dict[str, Any]) -> ReplayResult:
         started_at = datetime.now(UTC)
+        # run() recurses for the re-login sub-capability; that must spend the outer run's budget,
+        # not restart the clock.
+        if self._deadline_at is None and self.deadline_s is not None:
+            self._deadline_at = time.monotonic() + self.deadline_s
         input_errors = validate_input(artifact.input_schema, inputs)
         if input_errors:
             return self._finish(artifact, started_at, ReplayResult(
                 status=ReplayStatus.HARD_FAILURE, capability_id=artifact.capability_id,
-                error=ReplayError(message="; ".join(input_errors)),
+                error=ReplayError(message="; ".join(input_errors), code="input_invalid"),
                 started_at=started_at, finished_at=datetime.now(UTC),
             ))
 
@@ -111,7 +153,7 @@ class ReplayEngine:
                 if restarts > MAX_ARTIFACT_RESTARTS:
                     return self._finish(artifact, started_at, ReplayResult(
                         status=ReplayStatus.HARD_FAILURE, capability_id=artifact.capability_id,
-                        error=ReplayError(message="exceeded max artifact restarts after reauthentication"),
+                        error=ReplayError(message="exceeded max artifact restarts after reauthentication", code="max_recovery"),
                         started_at=started_at, finished_at=datetime.now(UTC),
                     ))
                 continue
@@ -121,6 +163,19 @@ class ReplayEngine:
                     business_outcome=bo.outcome,
                     outputs=self._build_business_outputs(artifact, bo.outcome, bo.output_field),
                     steps_completed=bo.steps_completed,
+                    started_at=started_at, finished_at=datetime.now(UTC),
+                ))
+            except _NeedsReview as nr:
+                return self._finish(artifact, started_at, ReplayResult(
+                    status=ReplayStatus.NEEDS_REVIEW, capability_id=artifact.capability_id,
+                    error=nr.error, steps_completed=nr.steps_completed,
+                    started_at=started_at, finished_at=datetime.now(UTC),
+                ))
+            except _DryRunStop as ds:
+                return self._finish(artifact, started_at, ReplayResult(
+                    status=ReplayStatus.DRY_RUN, capability_id=artifact.capability_id,
+                    outputs=ds.outputs, steps_completed=ds.steps_completed, dry_run=True,
+                    error=ReplayError(step_id=ds.step_id, message=f"dry run: stopped before irreversible step {ds.step_id}", code="dry_run"),
                     started_at=started_at, finished_at=datetime.now(UTC),
                 ))
             except _HardFailure as hf:
@@ -145,16 +200,21 @@ class ReplayEngine:
         non_idempotent_done = False
 
         for step in artifact.steps:
+            if self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE:
+                raise _DryRunStop(step.step_id, completed, dict(outputs))
             extracted = self._run_step_with_recovery(artifact, step, variables, completed, non_idempotent_done)
             completed.append(step.step_id)
-            if step.risk_level == "irreversible" or not step.idempotent:
+            if step.risk_level == StepRiskLevel.IRREVERSIBLE:
+                self._committed = True
+                self._commit_step = step.step_id
+            if step.risk_level == StepRiskLevel.IRREVERSIBLE or not step.idempotent:
                 non_idempotent_done = True
             if step.output_binding:
                 outputs[step.output_binding] = coerce_output(
                     extracted, artifact.output_schema.properties.get(step.output_binding)
                 )
 
-        if not self.surface.check_signal(substitute_signal(artifact.success_checkpoint, variables)):
+        if not self._wait_signal(substitute_signal(artifact.success_checkpoint, variables)):
             outcome = self._classify(artifact, variables)
             if outcome is None:
                 if self.session_manager is not None:
@@ -166,10 +226,16 @@ class ReplayEngine:
                         raise _HardFailure(ReplayError(message=sc.reason), completed) from None
                     self._escalated = True
                     if not self.surface.check_signal(substitute_signal(artifact.success_checkpoint, variables)):
-                        raise _HardFailure(ReplayError(message="success_checkpoint still not met after human intervention"), completed)
+                        raise _HardFailure(ReplayError(message="success_checkpoint still not met after human intervention", code="checkpoint_failed"), completed)
                     return completed, outputs
+                if self._committed:
+                    # every step ran, including the commit, but the page does not confirm the end state
+                    raise _NeedsReview(ReplayError(
+                        step_id=self._commit_step, code="ambiguous_commit",
+                        message="the commit step ran but the success checkpoint was not met; verify against the target's records before retrying",
+                    ), completed)
                 raise _HardFailure(ReplayError(
-                    message="all steps completed but success_checkpoint was not met",
+                    message="all steps completed but success_checkpoint was not met", code="checkpoint_failed",
                 ), completed)
             self._handle_classified(artifact, outcome, None, variables, completed, non_idempotent_done)
             # a recoverable rule that clears is only meaningful if it changes whether the
@@ -186,9 +252,17 @@ class ReplayEngine:
         completed_so_far: list[str], non_idempotent_done: bool, depth: int = 0,
     ) -> str | None:
         if depth > MAX_RECOVERY_ATTEMPTS_PER_STEP:
-            raise _HardFailure(ReplayError(step_id=step.step_id, message="exceeded max recovery attempts"), completed_so_far)
+            raise _HardFailure(ReplayError(step_id=step.step_id, message="exceeded max recovery attempts", code="max_recovery"), completed_so_far)
+        self._check_budget(completed_so_far)
 
         result = self.surface.act(self._build_action(step, variables))
+        # A step that must never run twice (irreversible, or declared non-idempotent) and was
+        # actually issued: from here on any doubt about the outcome is a human's to settle, never
+        # a retry's. A step the safety policy refused, or whose locator never resolved, was not
+        # issued, so it stays freely retryable.
+        issued = result.dispatched and self._unsafe_to_repeat(step)
+        if issued and step.risk_level == StepRiskLevel.IRREVERSIBLE:
+            self._commit_step = step.step_id
 
         # Classify proactively, even after a nominally successful action -- not only on
         # checkpoint failure. A checkpoint like url_matches can pass on a broken page that
@@ -197,14 +271,27 @@ class ReplayEngine:
         # that -- a weak checkpoint alone wouldn't.
         outcome = self._classify(artifact, variables)
         if outcome is not None:
-            self._handle_classified(artifact, outcome, step, variables, completed_so_far, non_idempotent_done)
-            return self._run_step_with_recovery(artifact, step, variables, completed_so_far, non_idempotent_done, depth + 1)
+            return self._resolve_outcome(artifact, outcome, step, variables, completed_so_far, non_idempotent_done, depth, issued)
 
-        checkpoint_ok = result.success and (step.checkpoint is None or self.surface.check_signal(substitute_signal(step.checkpoint, variables)))
+        checkpoint_ok = result.success and (step.checkpoint is None or self._wait_signal(substitute_signal(step.checkpoint, variables)))
         if checkpoint_ok:
             return result.extracted_value
 
+        # A known error banner can take longer to render than the action; look once more now that
+        # the checkpoint wait has given the page time to finish.
+        outcome = self._classify(artifact, variables)
+        if outcome is not None:
+            return self._resolve_outcome(artifact, outcome, step, variables, completed_so_far, non_idempotent_done, depth, issued)
+
         failure_message = result.error or "checkpoint failed and no known business/recoverable signal matched"
+        if issued:
+            raise _NeedsReview(ReplayError(
+                step_id=step.step_id, code="ambiguous_commit",
+                message=f"step {step.step_id} was issued but its outcome could not be confirmed ({failure_message}); "
+                        "it was not retried. Verify against the target's records before running again.",
+            ), completed_so_far)
+        code = ("blocked" if result.blocked else "locator_unresolved" if result.unresolved
+                else "action_failed" if not result.success else "checkpoint_failed")
 
         # Escalate to a human exactly once per step: depth==0 means this is the first time
         # we've hit this specific failure (not a retry after a resume that failed again).
@@ -218,7 +305,7 @@ class ReplayEngine:
                 self.session_manager.pause(reason=failure_message, step_id=step.step_id)
             except SessionCancelled as sc:
                 self._escalated = True
-                raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason), completed_so_far) from None
+                raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason, code="cancelled"), completed_so_far) from None
             self._escalated = True
 
             # Don't blindly redo the original action on resume -- the human may already have
@@ -238,7 +325,51 @@ class ReplayEngine:
                 return None
             return self._run_step_with_recovery(artifact, step, variables, completed_so_far, non_idempotent_done, depth + 1)
 
-        raise _HardFailure(ReplayError(step_id=step.step_id, message=failure_message), completed_so_far)
+        raise _HardFailure(ReplayError(step_id=step.step_id, message=failure_message, code=code), completed_so_far)
+
+    def _resolve_outcome(self, artifact, outcome, step, variables, completed_so_far, non_idempotent_done, depth, issued) -> str | None:
+        kind, _payload = outcome
+        if kind == "recoverable" and issued:
+            # e.g. the session-expired page or a 500 banner right after the commit click: the
+            # server may or may not have processed it, so neither reauthenticating nor retrying is safe.
+            raise _NeedsReview(ReplayError(
+                step_id=step.step_id, code="ambiguous_commit",
+                message=f"step {step.step_id} was issued and the page then showed a recoverable condition; "
+                        "the commit may or may not have taken effect, so it was not retried.",
+            ), completed_so_far)
+        self._handle_classified(artifact, outcome, step, variables, completed_so_far, non_idempotent_done)
+        return self._run_step_with_recovery(artifact, step, variables, completed_so_far, non_idempotent_done, depth + 1)
+
+    @staticmethod
+    def _unsafe_to_repeat(step: Step) -> bool:
+        return step.risk_level == StepRiskLevel.IRREVERSIBLE or not step.idempotent
+
+    # ---- time budget, cancellation, waiting ---------------------------------------------
+
+    def _check_budget(self, completed: list[str]) -> None:
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise _HardFailure(ReplayError(message="run cancelled", code="cancelled"), completed)
+        if self._deadline_at is not None and time.monotonic() >= self._deadline_at:
+            raise _HardFailure(ReplayError(message=f"run exceeded its {self.deadline_s:g}s time budget", code="timeout"), completed)
+
+    def _sleep(self, seconds: float, completed: list[str]) -> None:
+        """Sleeps in short slices so a cancel or the run deadline interrupts a long backoff."""
+        end = time.monotonic() + seconds
+        while (remaining := end - time.monotonic()) > 0:
+            self._check_budget(completed)
+            time.sleep(min(0.05, remaining))
+
+    def _wait_signal(self, signal) -> bool:
+        """Polls a checkpoint until it holds or the checkpoint timeout (capped by the run deadline) passes."""
+        end = time.monotonic() + self.checkpoint_timeout_s
+        if self._deadline_at is not None:
+            end = min(end, self._deadline_at)
+        while True:
+            if self.surface.check_signal(signal):
+                return True
+            if time.monotonic() >= end:
+                return False
+            time.sleep(CHECKPOINT_POLL_S)
 
     def _handle_classified(self, artifact, outcome, step, variables, completed_so_far, non_idempotent_done) -> None:
         kind, payload = outcome
@@ -249,17 +380,17 @@ class ReplayEngine:
         if rule.action == RecoveryAction.REAUTHENTICATE_AND_RESUME:
             if non_idempotent_done:
                 raise _HardFailure(ReplayError(
-                    step_id=step.step_id if step else None,
+                    step_id=step.step_id if step else None, code="unsafe_resume",
                     message="session expired after a non-idempotent step already completed -- cannot safely auto-resume",
                 ), completed_so_far)
             self._reauthenticate(artifact)
             self._recovered = True
             raise _RestartArtifact()
 
-        recovered = self._apply_bounded_recovery(rule, step, variables)
+        recovered = self._apply_bounded_recovery(rule, step, variables, completed_so_far)
         if not recovered:
             raise _HardFailure(ReplayError(
-                step_id=step.step_id if step else None,
+                step_id=step.step_id if step else None, code="max_recovery",
                 message=f"recovery action '{rule.action.value}' did not clear the triggering condition within {rule.max_attempts} attempt(s)",
             ), completed_so_far)
         self._recovered = True
@@ -273,12 +404,20 @@ class ReplayEngine:
                 return "recoverable", {"rule": rule}
         return None
 
-    def _apply_bounded_recovery(self, rule: RecoverableRule, step: Step | None, variables: dict[str, Any]) -> bool:
-        for _attempt in range(rule.max_attempts):
+    def _apply_bounded_recovery(self, rule: RecoverableRule, step: Step | None, variables: dict[str, Any], completed: list[str]) -> bool:
+        for attempt in range(rule.max_attempts):
             if rule.backoff_ms:
-                time.sleep(rule.backoff_ms / 1000)
+                self._sleep(rule.backoff_ms * rule.backoff_multiplier ** attempt / 1000, completed)
+            else:
+                self._check_budget(completed)
             if rule.action == RecoveryAction.RETRY and step is not None:
-                self.surface.act(self._build_action(step, variables))
+                retried = self.surface.act(self._build_action(step, variables))
+                if retried.dispatched and self._unsafe_to_repeat(step):
+                    # never a second issue of a step that must run once, whatever the rule says
+                    raise _NeedsReview(ReplayError(
+                        step_id=step.step_id, code="ambiguous_commit",
+                        message=f"step {step.step_id} cannot be retried safely; a recovery rule asked to re-run it",
+                    ), completed)
             elif rule.action == RecoveryAction.DISMISS_AND_CONTINUE:
                 self.surface.act(Action(kind=ActionType.DISMISS_DIALOG, target=rule.recovery_target, actor="replay"))
             if not self.surface.check_signal(substitute_signal(rule.signal, variables)):
@@ -287,17 +426,17 @@ class ReplayEngine:
 
     def _reauthenticate(self, artifact: Artifact) -> None:
         if self.reauth_credentials is None or artifact.preconditions is None or not artifact.preconditions.requires_capability:
-            raise _HardFailure(ReplayError(message="session expired but no reauthentication capability/credentials configured"), [])
+            raise _HardFailure(ReplayError(message="session expired but no reauthentication capability/credentials configured", code="no_reauth"), [])
         login_artifact = load_artifact_by_id(artifact.preconditions.requires_capability, directory=self.artifacts_dir)
         login_result = self.run(login_artifact, self.reauth_credentials)
         if login_result.status != ReplayStatus.SUCCESS:
             raise _HardFailure(ReplayError(
-                message=f"reauthentication via '{login_artifact.capability_id}' did not succeed (status={login_result.status.value})",
+                message=f"reauthentication via '{login_artifact.capability_id}' did not succeed (status={login_result.status.value})", code="no_reauth",
             ), [])
 
     def _build_action(self, step: Step, variables: dict[str, Any]) -> Action:
         params = substitute(step.params, variables)
-        return Action(kind=step.action, target=step.target, params=params, actor="replay")
+        return Action(kind=step.action, target=step.target, params=params, actor="replay", confirmed=step.step_id in self.confirmed_steps)
 
     def _build_business_outputs(self, artifact: Artifact, outcome: str, output_field: str) -> dict[str, Any]:
         outputs: dict[str, Any] = {k: None for k in artifact.output_schema.properties}
@@ -307,6 +446,8 @@ class ReplayEngine:
     def _finish(self, artifact: Artifact, started_at: datetime, result: ReplayResult) -> ReplayResult:
         result.escalated = self._escalated
         result.recovered = self._recovered
+        result.committed = self._committed
+        result.commit_step = self._commit_step
         if self.evidence_logger is not None:
             self.evidence_logger.log(
                 "replay", "result",
@@ -315,6 +456,7 @@ class ReplayEngine:
                 error=result.error.model_dump() if result.error else None,
                 steps_completed=result.steps_completed,
                 escalated=result.escalated, recovered=result.recovered,
+                committed=result.committed, commit_step=result.commit_step,
                 duration_s=(result.finished_at - started_at).total_seconds(),
             )
         return result

@@ -1,0 +1,50 @@
+# Safety policy. Loaded by safety/config.py; edit this file, not the code.
+#
+# approval: how an irreversible step of a capability gets authorised.
+#   live        (default) the step is blocked until a human confirms it on the operator console, mid-run.
+#   operator    a recorded approval from anyone on the roster below, other than the requester, before the run starts.
+#   supervisor  as above, but the approver must hold the supervisor role.
+# A capability with no irreversible step ignores this.
+#
+# Approver identity is asserted, not authenticated: the roster says who is allowed to approve, but nothing
+# yet proves the caller is that person. Real authentication arrives with API-key auth (Phase 3).
+version: 1
+
+approvers:
+  sam.reyes: operator
+  dana.okafor: supervisor
+
+capabilities:
+  clinic.issue_refund:
+    approval: supervisor
+    caps:
+      max_param: {amount: 1000.00}     # a hard ceiling, well above the clinic's own $200 approval threshold; refused before any browser starts
+      max_commits_per_day: 25
+  clinic.write_off_balance:
+    approval: supervisor
+    caps:
+      max_param: {amount: 500.00}
+      max_commits_per_day: 10
+  clinic.cancel_appointment:
+    approval: operator
+    caps:
+      max_commits_per_day: 100
+  clinic.submit_claim:
+    approval: operator
+  clinic.update_patient_contact:
+    approval: live
+
+# Words that make an action irreversible. These extend, never replace, the built-in lists in safety/risk.py.
+risk_keywords:
+  commit: [approve, reject]
+  domain: []
+
+# Applied to evidence (log.jsonl, result.json) and to the run store's copy of parameters.
+# Screenshots are not redacted: there is no reliable way to know where a value renders on screen.
+redaction:
+  patterns:
+    ssn: '\b\d{3}-\d{2}-\d{4}\b'
+    email: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    phone: '\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b'
+    card: '\b(?:\d[ -]?){13,16}\b'
+  field_names: [password, secret, token, credential, ssn, dob, date_of_birth, address]

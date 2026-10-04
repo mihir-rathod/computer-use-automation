@@ -96,7 +96,8 @@
             "value": "#member_id",
             "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
           }
-        ]
+        ],
+        "hints": {}
       },
       "params": {
         "text": "{{member_id}}"
@@ -118,7 +119,8 @@
               "value": "#member_id",
               "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
             }
-          ]
+          ],
+          "hints": {}
         },
         "description": null
       },
@@ -136,7 +138,8 @@
             "value": "button[name='Search']",
             "note": "Primary: accessible role + name, computed at discovery time."
           }
-        ]
+        ],
+        "hints": {}
       },
       "params": {},
       "output_binding": null,
@@ -165,7 +168,8 @@
             "value": "#savings-balance-value",
             "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
           }
-        ]
+        ],
+        "hints": {}
       },
       "params": {},
       "output_binding": "savings_balance",
@@ -189,7 +193,8 @@
             "value": "#checking-balance-value",
             "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
           }
-        ]
+        ],
+        "hints": {}
       },
       "params": {},
       "output_binding": "checking_balance",
@@ -213,7 +218,8 @@
             "value": "#account-status-value",
             "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
           }
-        ]
+        ],
+        "hints": {}
       },
       "params": {},
       "output_binding": "account_status",
@@ -256,6 +262,7 @@
         "action": "retry",
         "max_attempts": 3,
         "backoff_ms": 1000,
+        "backoff_multiplier": 1.0,
         "recovery_target": null
       },
       {
@@ -268,6 +275,7 @@
         "action": "dismiss_and_continue",
         "max_attempts": 1,
         "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
         "recovery_target": {
           "semantic_description": "dismiss button on the Terms Updated modal",
           "locators": [
@@ -276,7 +284,8 @@
               "value": "button[name='Dismiss']",
               "note": null
             }
-          ]
+          ],
+          "hints": {}
         }
       },
       {
@@ -289,6 +298,7 @@
         "action": "reauthenticate_and_resume",
         "max_attempts": 1,
         "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
         "recovery_target": null
       }
     ],
@@ -303,9 +313,15 @@
     "discovery_run_id": "discovery_run_20260814T203323Z",
     "created_at": "2026-08-14T20:33:28.203244Z",
     "reviewed": false,
-    "note": "LLM-discovered; not yet human-reviewed."
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
   },
   "success_output_defaults": {
     "status": "found"
-  }
+  },
+  "canary": null
 }

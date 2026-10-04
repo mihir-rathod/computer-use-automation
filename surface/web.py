@@ -14,7 +14,10 @@ the replay engine's job -- Surface doesn't know about output_schema at all.
 from __future__ import annotations
 
 import fnmatch
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 from playwright.sync_api import Page
@@ -28,6 +31,40 @@ from surface.aria import parse_aria_snapshot
 from surface.base import Action, ActionResult, ObservedElement, ObservedState, Surface
 from surface.locator_resolver import resolve_target
 
+@dataclass
+class SettleConfig:
+    """After an action that can change the page, wait for it to stop changing before anything reads
+    it. Pending network requests and DOM mutations both count as "still changing"; both waits are
+    bounded, so a page that never goes quiet slows an action down rather than failing it."""
+    enabled: bool = True
+    quiet_ms: int = 150
+    timeout_ms: int = 2500
+
+
+_SETTLE_AFTER = {ActionType.NAVIGATE, ActionType.CLICK, ActionType.SELECT, ActionType.DISMISS_DIALOG}
+_DISPATCHING = {ActionType.NAVIGATE, ActionType.CLICK, ActionType.SELECT, ActionType.TYPE, ActionType.DISMISS_DIALOG}
+
+_DOM_QUIET_JS = """([quiet, max]) => new Promise((resolve) => {
+  let timer = setTimeout(done, quiet);
+  const hard = setTimeout(done, max);
+  const obs = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, quiet); });
+  obs.observe(document.documentElement, {subtree: true, childList: true, attributes: true, characterData: true});
+  function done() { obs.disconnect(); clearTimeout(timer); clearTimeout(hard); resolve(true); }
+})"""
+
+# For a table cell: is its accessible name just its own text (so it is *data*, which differs between
+# records), and what is the label cell to its left?
+_CELL_FACTS_JS = """(el) => {
+  const text = (n) => (n && n.innerText ? n.innerText : '').trim();
+  let label = null;
+  if (el.tagName === 'TD' || el.tagName === 'TH') {
+    let prev = el.previousElementSibling;
+    while (prev && !text(prev)) prev = prev.previousElementSibling;
+    if (prev) label = text(prev);
+  }
+  return {dataValued: !el.getAttribute('aria-label'), label};
+}"""
+
 _ACTIONABLE_KINDS = {ActionType.CLICK, ActionType.TYPE, ActionType.SELECT, ActionType.EXTRACT, ActionType.WAIT_FOR, ActionType.DISMISS_DIALOG}
 
 
@@ -39,8 +76,16 @@ class WebSurface(Surface):
         screenshot_dir: Path | None = None,
         evidence_logger: EvidenceLogger | None = None,
         safety_policy: SafetyPolicy | None = None,
+        settle: SettleConfig | None = None,
     ):
         self.page = page
+        self.settle = settle or SettleConfig()
+        self._inflight = 0
+        self._last_net_activity = time.monotonic()
+        self._dispatched = False
+        page.on("request", self._net_start)
+        page.on("requestfinished", self._net_end)
+        page.on("requestfailed", self._net_end)
         self.base_url = base_url
         self.screenshot_dir = Path(screenshot_dir) if screenshot_dir else None
         self.evidence_logger = evidence_logger
@@ -48,11 +93,41 @@ class WebSurface(Surface):
         self._last_elements: dict[str, ObservedElement] = {}
         self._screenshot_seq = 0
 
+    # ---- settling ---------------------------------------------------------------------
+
+    def _net_start(self, _request: object) -> None:
+        self._inflight += 1
+        self._last_net_activity = time.monotonic()
+
+    def _net_end(self, _request: object) -> None:
+        self._inflight = max(0, self._inflight - 1)
+        self._last_net_activity = time.monotonic()
+
+    def _settle(self) -> None:
+        if not self.settle.enabled:
+            return
+        deadline = time.monotonic() + self.settle.timeout_ms / 1000
+        try:
+            self.page.wait_for_load_state("load", timeout=self.settle.timeout_ms)
+        except Exception:
+            pass
+        quiet = self.settle.quiet_ms / 1000
+        while time.monotonic() < deadline:
+            if self._inflight == 0 and time.monotonic() - self._last_net_activity >= quiet:
+                break
+            self.page.wait_for_timeout(25)
+        remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+        try:
+            self.page.evaluate(_DOM_QUIET_JS, [self.settle.quiet_ms, max(remaining_ms, self.settle.quiet_ms)])
+        except Exception:
+            pass  # the page navigated mid-wait and the old context is gone; the next read will wait for the new one
+
     # ---- perceive ---------------------------------------------------------------------
 
     def perceive(self, actor: str = "system") -> ObservedState:
         snapshot_text = self.page.locator("body").aria_snapshot(mode="ai")
         elements = parse_aria_snapshot(snapshot_text)
+        self._name_unlabeled_controls(elements)
         self._last_elements = {el.ref: el for el in elements}
         screenshot_path = self._capture_screenshot()
         state = ObservedState(
@@ -65,6 +140,19 @@ class WebSurface(Surface):
                 element_count=len(elements), screenshot=screenshot_path,
             )
         return state
+
+    _FORM_ROLES = {"textbox", "searchbox", "combobox", "listbox", "spinbutton", "checkbox", "radio"}
+
+    def _name_unlabeled_controls(self, elements: list[ObservedElement]) -> None:
+        """Legacy forms often have no <label> at all, so several textboxes look identical. The HTML `name`
+        attribute is what the server keys the value on; surfacing it lets discovery tell them apart."""
+        for el in elements:
+            if el.name or el.role not in self._FORM_ROLES:
+                continue
+            try:
+                el.html_name = self.page.locator(f"aria-ref={el.ref}").get_attribute("name", timeout=500)
+            except Exception:
+                el.html_name = None
 
     def _capture_screenshot(self) -> str | None:
         if self.screenshot_dir is None:
@@ -81,27 +169,27 @@ class WebSurface(Surface):
         element = self._last_elements.get(ref)
         if element is None:
             raise ValueError(f"ref '{ref}' is not from the most recent perceive() call")
+        pw_locator = self.page.locator(f"aria-ref={ref}")
+        anchored = self._label_anchored_cell(element, pw_locator)
+        if anchored is not None:
+            return anchored
         locators = [SchemaLocator(
             strategy=LocatorStrategy.ROLE,
             value=f"{element.role}[name='{element.name}']" if element.name else element.role,
             note="Primary: accessible role + name, computed at discovery time.",
         )]
-        pw_locator = self.page.locator(f"aria-ref={ref}")
         css_id = pw_locator.get_attribute("id")
         if css_id:
             locators.append(SchemaLocator(
                 strategy=LocatorStrategy.CSS, value=f"#{css_id}",
                 note="Fallback: element id present at discovery time, not guaranteed stable across tenants.",
             ))
-        elif not element.name:
-            # No accessible name AND no id -- found against legacy table-layout forms with
-            # no <label>/aria-label at all: the primary role locator
-            # above degrades to a bare role (e.g. "textbox") with nothing to disambiguate it,
-            # which matches every same-role field on the page and is treated as no match at all
-            # by resolve_target's "ambiguous match = no match" rule -- replay failed here with
-            # "could not resolve element" before this fallback existed. The HTML `name`
-            # attribute is a stable identifier even without a label: it's literally what the
-            # server keys the submitted value off.
+        if not element.name:
+            # No accessible name: found against legacy table-layout forms with no <label>/aria-label at all. The
+            # primary role locator degrades to a bare role (e.g. "textbox") that matches every same-role field,
+            # which resolve_target treats as no match. The HTML `name` attribute is what the server keys the
+            # submitted value off, so it is the stable identifier. It is added even when an id exists, because the
+            # id is the first thing a vendor release renames (clinic drift level 1 breaks login without this).
             html_name = pw_locator.get_attribute("name")
             if html_name:
                 locators.append(SchemaLocator(
@@ -109,7 +197,50 @@ class WebSurface(Surface):
                     note="Fallback: no accessible name or id at discovery time -- the HTML name "
                          "attribute is the only stable identifier this element has.",
                 ))
-        return Target(semantic_description=element.name or element.role, locators=locators)
+        description = element.name or (f"{element.role} (form field {element.html_name})" if element.html_name else element.role)
+        return Target(semantic_description=description, locators=locators, hints=self._hints_for(element, css_id))
+
+    def _hints_for(self, element: ObservedElement, css_id: str | None) -> dict[str, Any]:
+        """Where this element sat when it was recorded, so that if every locator later breaks a repair proposal
+        can find the same element again: its role, its position among same-role elements, and what was around it."""
+        ordered = list(self._last_elements.values())
+        same_role = [e for e in ordered if e.role == element.role]
+        at = ordered.index(element)
+        named = lambda items: [e.name for e in items if e.name][:]  # noqa: E731
+        return {
+            "role": element.role,
+            "name": element.name,
+            "ordinal": same_role.index(element),
+            "same_role_count": len(same_role),
+            "before": named(ordered[max(0, at - 3):at])[-2:],
+            "after": named(ordered[at + 1:at + 4])[:2],
+            "html_name": element.html_name,
+            "id": css_id,
+        }
+
+    def _label_anchored_cell(self, element: ObservedElement, pw_locator: Any) -> Target | None:
+        """A value cell on a legacy page ('Phone' | '(206) 555-0111') is named by its own text, which is
+        different for every record: a role+name locator would hold one patient's phone number and either fail on
+        the next record or, worse, match some other cell that happens to show the same text. Anchor it to the
+        label cell beside it instead, which is the same on every record."""
+        if element.role not in ("cell", "gridcell"):
+            return None
+        try:
+            facts = pw_locator.evaluate(_CELL_FACTS_JS)
+        except Exception:
+            return None
+        label = facts.get("label")
+        if not facts.get("dataValued") or not label or '"' in label:
+            return None
+        xpath = f'(//*[self::td or self::th][normalize-space(.)="{label}"]/following-sibling::*[self::td or self::th][1])[1]'
+        return Target(
+            semantic_description=f"value cell beside the '{label}' label",
+            locators=[SchemaLocator(
+                strategy=LocatorStrategy.XPATH, value=xpath,
+                note="Anchored to the label cell to its left: a cell's own text is record data and changes between runs.",
+            )],
+            hints={"label": label},
+        )
 
     # ---- check_signal -------------------------------------------------------------------
 
@@ -147,10 +278,12 @@ class WebSurface(Surface):
     # ---- act ------------------------------------------------------------------------------
 
     def act(self, action: Action) -> ActionResult:
+        self._dispatched = False
         try:
             result = self._act(action)
         except Exception as exc:
             result = ActionResult(success=False, error=str(exc))
+        result.dispatched = result.dispatched or self._dispatched
         self._log_action(action, result)
         return result
 
@@ -164,25 +297,37 @@ class WebSurface(Surface):
                 confirmed=action.confirmed,
             )
             if not decision.allowed:
-                return ActionResult(success=False, error=decision.reason)
+                return ActionResult(success=False, error=decision.reason, blocked=decision.block_kind)
 
         if action.kind == ActionType.NAVIGATE:
             url = action.params["url"]
             full_url = url if url.startswith("http") else urljoin(self.base_url, url)
+            self._dispatched = True
             self.page.goto(full_url)
+            self._settle()
             return ActionResult(success=True)
 
         resolved = self._resolve(action)
         if resolved is None:
-            return ActionResult(success=False, error="could not resolve element")
+            return ActionResult(success=False, error="could not resolve element", unresolved=True)
         pw_locator, resolved_target, resolved_strategy = resolved
 
+        if action.kind in _DISPATCHING:
+            self._dispatched = True
         if action.kind in (ActionType.CLICK, ActionType.DISMISS_DIALOG):
             pw_locator.click()
         elif action.kind == ActionType.TYPE:
             pw_locator.fill(action.params["text"])
         elif action.kind == ActionType.SELECT:
-            pw_locator.select_option(value=action.params["value"])
+            wanted = action.params["value"]
+            try:
+                pw_locator.select_option(value=wanted, timeout=1500)
+            except Exception:
+                # a model often names the option by its visible label ("Weather") rather than its value ("weather")
+                pw_locator.select_option(label=wanted)
+            actual = pw_locator.evaluate("el => el.value")
+            return ActionResult(success=True, resolved_target=resolved_target, resolved_strategy=resolved_strategy,
+                                applied_params={"value": actual} if actual != wanted else None)
         elif action.kind == ActionType.EXTRACT:
             value = pw_locator.inner_text().strip()
             return ActionResult(success=True, resolved_target=resolved_target, resolved_strategy=resolved_strategy, extracted_value=value)
@@ -191,6 +336,8 @@ class WebSurface(Surface):
         else:
             return ActionResult(success=False, error=f"unsupported action kind: {action.kind}")
 
+        if action.kind in _SETTLE_AFTER:
+            self._settle()
         return ActionResult(success=True, resolved_target=resolved_target, resolved_strategy=resolved_strategy)
 
     def _url_for_safety_check(self, action: Action) -> str:
@@ -232,9 +379,13 @@ class WebSurface(Surface):
             return
         params = action.params
         if action.kind == ActionType.TYPE:
-            semantic = action.target.semantic_description if action.target else (
-                self._last_elements[action.ref].name if action.ref in self._last_elements else None
-            )
+            element = self._last_elements.get(action.ref) if action.ref else None
+            semantic = " ".join(filter(None, [
+                action.target.semantic_description if action.target else None,
+                element.name if element else None,
+                element.html_name if element else None,
+                result.resolved_target.semantic_description if result.resolved_target else None,
+            ])) or None
             params = redact_type_params(action.params, semantic)
         error_screenshot = self._capture_screenshot() if not result.success else None
         self.evidence_logger.log(

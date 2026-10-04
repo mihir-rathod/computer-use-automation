@@ -187,6 +187,14 @@ def _render_result(capability_id: str, result: dict[str, Any]) -> str:
 
     err = result.get("error") or {}
     run_id = Path(result["evidence_dir"]).name
+    if status == "pending_approval":
+        return (f"{capability_id} needs a {result.get('approval_tier')} approval before it can run (run {result.get('run_id')}). "
+                "Nothing has been done yet.")
+    if status == "needs_review":
+        return (f"{capability_id} was submitted but its outcome could not be confirmed, so it was NOT retried (run {result.get('run_id')}). "
+                f"Check the target's records before running it again:\n{err.get('message', '')}")
+    if status == "dry_run":
+        return f"Dry run of {capability_id}: stopped before the irreversible step; nothing was changed."
     # By the time a response comes back at all, any pause already got resolved (see chat_send's
     # TimeoutException handling below for the *still paused* case) -- so this is a definitive
     # outcome, not "it's paused right now"; escalated just means a human already tried and it

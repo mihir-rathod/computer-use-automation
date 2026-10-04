@@ -22,6 +22,7 @@ class SafetyDecision:
     allowed: bool
     risk_level: StepRiskLevel
     reason: str | None = None
+    block_kind: str | None = None
 
 
 class SafetyPolicy:
@@ -46,9 +47,9 @@ class SafetyPolicy:
         try:
             self.allowlist.check(url, action_type.value)
         except AllowlistViolation as exc:
-            return SafetyDecision(allowed=False, risk_level=StepRiskLevel.SAFE, reason=f"blocked by allowlist: {exc}")
+            return SafetyDecision(allowed=False, risk_level=StepRiskLevel.SAFE, reason=f"blocked by allowlist: {exc}", block_kind="allowlist")
 
         risk = self.risk_classifier.classify(action_type, semantic_description, current_path)
         if risk == StepRiskLevel.IRREVERSIBLE and self.require_confirmation_for_irreversible and not confirmed:
-            return SafetyDecision(allowed=False, risk_level=risk, reason="blocked: irreversible action requires confirmation")
+            return SafetyDecision(allowed=False, risk_level=risk, reason="blocked: irreversible action requires confirmation", block_kind="irreversible_unconfirmed")
         return SafetyDecision(allowed=True, risk_level=risk)

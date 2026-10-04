@@ -52,6 +52,9 @@ class InvokeRequest(BaseModel):
     password: str | None = None
     headed: bool = False
     slow_mo: int = 0
+    idempotency_key: str | None = Field(default=None, description="A retry with the same key returns the first run's result instead of running again.")
+    requested_by: str = "api"
+    dry_run: bool = False
     evidence_dir: str | None = Field(
         default=None, description="Pre-computed run id/path -- lets a caller (the chatbot) know "
                                     "the run's id before it starts, e.g. to link to its operator "
@@ -94,7 +97,8 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
         result, evidence_dir = run_replay(
             capability_id, body.params,
             target=body.target, base_url=body.base_url, username=body.username, password=body.password,
-            headed=body.headed, slow_mo=body.slow_mo,
+            headed=body.headed, slow_mo=body.slow_mo, dry_run=body.dry_run,
+            idempotency_key=body.idempotency_key, requested_by=body.requested_by,
             evidence_dir=Path(body.evidence_dir) if body.evidence_dir else None,
         )
     except FileNotFoundError:
@@ -109,5 +113,9 @@ def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]
         "steps_completed": result.steps_completed,
         "escalated": result.escalated,
         "recovered": result.recovered,
+        "run_id": result.run_id,
+        "committed": result.committed,
+        "deduplicated": result.deduplicated,
+        "approval_tier": result.approval_tier,
         "evidence_dir": str(evidence_dir),
     }

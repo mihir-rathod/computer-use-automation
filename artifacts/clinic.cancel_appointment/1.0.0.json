@@ -1,0 +1,423 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.cancel_appointment",
+  "version": "1.0.0",
+  "name": "Cancel an appointment",
+  "description": "Cancels a scheduled appointment and returns the receipt number.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "appointment": {
+        "type": "string",
+        "pattern": "^A-[0-9]{5}$"
+      },
+      "reason": {
+        "type": "string",
+        "enum": [
+          "patient_request",
+          "provider_unavailable",
+          "weather",
+          "duplicate_booking"
+        ]
+      }
+    },
+    "required": [
+      "appointment",
+      "reason"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "cancelled",
+          "not_found",
+          "validation_error"
+        ]
+      },
+      "receipt_number": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "APPOINTMENT CANCELLED",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/fn/cancel"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/fn/cancel",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field number)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='number']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Cancel appointment",
+            "Appointment no."
+          ],
+          "after": [
+            "Continue"
+          ],
+          "html_name": "number",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{appointment}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{appointment}}",
+        "target": {
+          "semantic_description": "textbox (form field number)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='number']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 1,
+            "before": [
+              "Cancel appointment",
+              "Appointment no."
+            ],
+            "after": [
+              "Continue"
+            ],
+            "html_name": "number",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Cancel appointment",
+            "Appointment no."
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/appointments/{{appointment}}/cancel",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "select",
+      "target": {
+        "semantic_description": "combobox (form field reason)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "combobox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='reason']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "combobox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Reason",
+            "-- select --"
+          ],
+          "after": [
+            "Notes",
+            "Continue"
+          ],
+          "html_name": "reason",
+          "id": null
+        }
+      },
+      "params": {
+        "value": "{{reason}}"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Notes"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/transactions/cancel/review",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "click",
+      "target": {
+        "semantic_description": "Confirm",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Confirm']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#confirm_btn",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Confirm",
+          "ordinal": 1,
+          "same_role_count": 3,
+          "before": [
+            "Late cancellation fee",
+            "$0.00"
+          ],
+          "after": [
+            "Back"
+          ],
+          "html_name": null,
+          "id": "confirm_btn"
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/transactions/confirm",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "irreversible",
+      "idempotent": false
+    },
+    {
+      "step_id": "s7",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Receipt number' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Receipt number\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Receipt number"
+        }
+      },
+      "params": {},
+      "output_binding": "receipt_number",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "RECORD NOT FOUND",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Please correct the following",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "APPLICATION ERROR",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 2,
+        "backoff_ms": 300,
+        "backoff_multiplier": 2.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "YOUR SESSION HAS TIMED OUT",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": true
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261003T213848Z",
+    "created_at": "2026-10-03T21:38:56.121210Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": [
+      {
+        "step_id": "s6",
+        "approver": "auto:sandbox",
+        "mode": "auto_sandbox",
+        "at": "2026-10-03T21:38:56.121198Z"
+      }
+    ]
+  },
+  "success_output_defaults": {
+    "status": "cancelled"
+  },
+  "canary": null
+}

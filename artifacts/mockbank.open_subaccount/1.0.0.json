@@ -1,0 +1,361 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "mockbank.open_subaccount",
+  "version": "1.0.0",
+  "name": "Open a sub-account for a member",
+  "description": "Opens a new savings or checking sub-account for an existing member with a given initial deposit, and returns the confirmation number.",
+  "target": {
+    "app_id": "mockbank",
+    "surface_type": "web",
+    "base_url": "http://localhost:8000",
+    "vendor_product": "mockbank-core",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "mockbank.login",
+    "note": "Assumes an authenticated operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "member_id": {
+        "type": "string",
+        "pattern": "^[0-9]{4,10}$"
+      },
+      "account_type": {
+        "type": "string",
+        "enum": [
+          "savings",
+          "checking"
+        ]
+      },
+      "initial_deposit": {
+        "type": "number",
+        "description": "Must be positive; a missing/non-positive value produces a validation_error business outcome, not a crash."
+      }
+    },
+    "required": [
+      "member_id",
+      "account_type",
+      "initial_deposit"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "opened",
+          "not_found",
+          "permission_denied",
+          "validation_error"
+        ]
+      },
+      "confirmation_number": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "Account Opened",
+    "target": null,
+    "description": "The overall goal: the sub-account was actually created, not just that every step's own checkpoint passed."
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/member/{{member_id}}/open-subaccount"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "text_present",
+        "value": "Open Sub-Account for",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "select",
+      "target": {
+        "semantic_description": "Account Type",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "combobox[name='Account Type']",
+            "note": "Primary: accessible name from the paired <label for>."
+          },
+          {
+            "strategy": "css",
+            "value": "#account_type",
+            "note": "Fallback: present today but not guaranteed across tenants."
+          }
+        ],
+        "hints": {}
+      },
+      "params": {
+        "value": "{{account_type}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{account_type}}",
+        "target": {
+          "semantic_description": "Account Type",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "combobox[name='Account Type']",
+              "note": null
+            },
+            {
+              "strategy": "css",
+              "value": "#account_type",
+              "note": null
+            }
+          ],
+          "hints": {}
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "type",
+      "target": {
+        "semantic_description": "Initial Deposit Amount",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox[name='Initial Deposit Amount']",
+            "note": null
+          },
+          {
+            "strategy": "css",
+            "value": "#initial_deposit",
+            "note": null
+          }
+        ],
+        "hints": {}
+      },
+      "params": {
+        "text": "{{initial_deposit}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{initial_deposit}}",
+        "target": {
+          "semantic_description": "Initial Deposit Amount",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox[name='Initial Deposit Amount']",
+              "note": null
+            },
+            {
+              "strategy": "css",
+              "value": "#initial_deposit",
+              "note": null
+            }
+          ],
+          "hints": {}
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": null
+          }
+        ],
+        "hints": {}
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "text_present",
+        "value": "Confirm New Sub-Account",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "click",
+      "target": {
+        "semantic_description": "Confirm & Open Account",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Confirm & Open Account']",
+            "note": "The one irreversible step in this flow -- creates a real sub-account, cannot be undone by replaying again."
+          }
+        ],
+        "hints": {}
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "text_present",
+        "value": "Account Opened",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "irreversible",
+      "idempotent": false
+    },
+    {
+      "step_id": "s6",
+      "action": "extract",
+      "target": {
+        "semantic_description": "Confirmation Number",
+        "locators": [
+          {
+            "strategy": "css",
+            "value": "#confirmation-number",
+            "note": "CSS, not role -- the element is a plain <span> with no implicit ARIA role, and its surrounding <p> collapses to a single text run ('Confirmation Number: CNF-...') in the accessibility tree, which would contaminate a role-based extraction with the label prefix. The id is precise here."
+          }
+        ],
+        "hints": {}
+      },
+      "params": {},
+      "output_binding": "confirmation_number",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "No member found",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Access denied",
+          "target": null,
+          "description": null
+        },
+        "outcome": "permission_denied",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Initial deposit amount is required and must be a positive number.",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Service temporarily unavailable",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 3,
+        "backoff_ms": 1000,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "dialog_present",
+          "value": "Terms Updated",
+          "target": null,
+          "description": null
+        },
+        "action": "dismiss_and_continue",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": {
+          "semantic_description": "dismiss button on the Terms Updated modal",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "button[name='Dismiss']",
+              "note": null
+            }
+          ],
+          "hints": {}
+        }
+      },
+      {
+        "signal": {
+          "type": "redirected_to",
+          "value": "**/login",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": true
+  },
+  "provenance": {
+    "discovered_by": "hand_written",
+    "discovery_run_id": "phase10-open-subaccount",
+    "created_at": "2026-08-15T00:00:00Z",
+    "reviewed": true,
+    "note": "Hand-written, not LLM-discovered -- a genuine LLM-driven discovery run is already covered by mockbank.member_balance_lookup. This capability exists specifically to exercise validation_error and an irreversible, confirmation-gated step at full artifact/replay granularity, which member_balance_lookup (read-only) cannot.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "opened"
+  },
+  "canary": null
+}

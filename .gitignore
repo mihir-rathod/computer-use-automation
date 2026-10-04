@@ -222,3 +222,4 @@ evidence/
 .DS_Store
 clinic/modern/node_modules/
 clinic/modern/dist/
+data/

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from artifacts_lib.schema import (
     BusinessOutcomeRule,
+    CanarySpec,
     CapabilityRiskLevel,
     CapabilityTarget,
     ErrorHandling,
@@ -47,6 +48,7 @@ class CapabilitySpec:
     safety: SafetyMeta
     preconditions: Preconditions | None = None
     success_output_defaults: dict[str, str] = field(default_factory=dict)
+    canary: CanarySpec | None = None
 
 
 def _mockbank_error_handling() -> ErrorHandling:
@@ -109,8 +111,16 @@ _CATALOG = {
 }
 
 
+def known_capabilities() -> list[str]:
+    from agent.catalog_clinic import CLINIC_CATALOG
+
+    return sorted({*_CATALOG, *CLINIC_CATALOG})
+
+
 def get_spec(capability_id: str, base_url: str) -> CapabilitySpec:
-    factory = _CATALOG.get(capability_id)
+    from agent.catalog_clinic import CLINIC_CATALOG
+
+    factory = _CATALOG.get(capability_id) or CLINIC_CATALOG.get(capability_id)
     if factory is None:
-        raise KeyError(f"unknown capability '{capability_id}' -- known: {sorted(_CATALOG)}")
+        raise KeyError(f"unknown capability '{capability_id}' -- known: {known_capabilities()}")
     return factory(base_url)
