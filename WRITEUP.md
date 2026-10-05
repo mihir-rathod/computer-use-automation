@@ -130,6 +130,27 @@ omitted optional input with an empty string, which would have blanked the field.
 or null input skips the step and the page keeps what it already holds; `at_least_one_of` demands that something be supplied. The recorder
 marks the steps for optional inputs itself, so a rediscovery produces this shape without hand-editing.
 
+## Observability and MCP decisions (phase 3b)
+
+**Metrics are queries over the run store, not a second set of counters.** The run store is already the system of record for every run, so
+`runs/metrics.py` derives success, failure, escalation and latency from it and states each definition (a business outcome is a good answer,
+`needs_review` is neither success nor failure, runs still waiting or never executed are excluded from rates). It is served as JSON and in
+Prometheus text format and printed by `cli.py metrics`.
+
+**One log line per event, tagged with the run, and never with values.** Logs are JSON on stderr. The run id travels in a context variable and
+is copied into browser-pool worker threads, so a line written deep in the executor or on a browser thread still carries it. Only an allowlist of
+facts is logged (ids, statuses, durations, error codes, parameter *names*); parameter values and API keys are not.
+
+**Traces for failures, on sandboxes, by policy.** A Playwright trace is the best evidence a failed run can leave, but it records everything typed,
+including passwords, and cannot be redacted. So the default keeps one only when a run fails and only for a target marked sandbox; both are
+settings in `safety/policy.yaml`, the file is created owner-only, and downloading it needs an operator key.
+
+**MCP is a doorway, not a new capability.** `mcp_server.py` is a thin client of `/v1`, so an assistant's call goes through the same validation, caps,
+idempotency and approvals as any other run, under the assistant's own key. Only recorded capabilities become tools (discovery is not exposed).
+There is no approve tool, so an assistant cannot approve its own request. A tool that commits something requires an `idempotency_key` (assistants
+retry); a request that needs an approval returns at once as "pending approval" instead of holding the conversation open; and an unknown outcome is
+reported as an error that says not to retry.
+
 ## Decisions and why
 
 **The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
@@ -291,9 +312,11 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Platform behavior | 242 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases |
+| Platform behavior | 267 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases, observability, MCP |
 | Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | A retried commit posts exactly once | `tests/test_clinic_capabilities.py`: same-key retry, response lost after commit, request lost before commit; all asserted on the clinic audit log with its own duplicate guard off |
+| Metrics, structured logs and traces behave as documented | `tests/test_observability.py`: definitions checked against hand-built runs, run id present on every line including browser threads, no values or keys in logs, trace kept only for failures on sandbox targets |
+| An assistant can use capabilities over MCP but cannot approve | `tests/test_mcp_server.py`: a real MCP client over memory and over real stdio, against the real API, browser and clinic; refund waits for a human approval, retry with the same key posts once, lost response says do not retry |
 | An irreversible step is not retried on a guess | `tests/test_replay_hardening.py` (needs_review, RETRY rule ignored, session expiry at commit) |
 | Every clinic capability replays | `tests/test_clinic_capabilities.py` replays the 8 checked-in LLM-discovered artifacts with different inputs than discovery |
 | Drift yields a repair proposal; approval makes a new version; rollback works | `tests/test_repair_and_canary.py`, `scripts/drift_report.py` |
@@ -330,6 +353,13 @@ These are verified against the code as of this writing.
 - **Timeouts cannot interrupt an action in flight.** The run deadline and cancel are checked between
   actions; an action itself is bounded by the 8s page timeout. The maintenance-page chaos rule is not
   recoverable by any artifact (there is no restart-from-the-top recovery action).
+- **Metrics, logs and traces are local.** Metrics reset with the database and nothing alerts on them; logs go to stderr and are not shipped
+  anywhere; a trace holds whatever was typed and exists only for failed runs on sandbox targets. There is no retention policy for evidence or
+  traces.
+- **MCP is minimal.** Stdio transport only; the server uses one API key for its whole life; the tool list is fetched when asked, with no
+  notification when a capability is added or an approval completes (the assistant has to poll `get_run_status`); a long run returns its run id
+  after `CUA_WAIT_SECONDS` rather than streaming progress. The tool descriptions and annotations are advice to an assistant, not enforcement:
+  enforcement is the platform behind it.
 - **Redaction is partial.** Evidence (`log.jsonl`, `result.json`) and the stored parameters in the
   evidence trail are scrubbed by pattern, field name and known secrets. Screenshots are not, and the run
   store keeps parameters and results unredacted because replaying an approved run and answering a
@@ -352,7 +382,6 @@ These are verified against the code as of this writing.
 
 ## What is next
 
-The rest of phase 3 (an MCP server exposing capabilities as tools with their risk metadata, structured logs, per-capability metrics and a
-Playwright trace per run); one unified UI over `/v1` with a task-first catalog, an operator inbox and chat as a secondary view (phase 4); a benchmark that reports success
+One unified UI over `/v1` with a task-first catalog, an operator inbox and chat as a secondary view (phase 4); a benchmark that reports success
 rate, recovery rate and discovery cost against zero-token replay; running the supervised gate and the LLM
 repair ranker live; deploying the clinic. None of these are claimed until they are built and measured.

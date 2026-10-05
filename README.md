@@ -8,7 +8,7 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 > app and against a purpose-built clinic app with fault injection, UI drift and an audit log. Eight
 > clinic capabilities have been discovered by the LLM and replay deterministically, with versioned
 > artifacts, approvals, idempotency keys, locator repair proposals and canaries around them. An async
-> API with auth, a unified UI and a measured benchmark are still to come. See
+> authenticated async API with metrics, structured logs, failure traces and an MCP server are in place. A unified UI and a measured benchmark are still to come. See
 > [WRITEUP.md](WRITEUP.md) for the design, the incidents, the measured drift results and an honest
 > list of what is not done.
 
@@ -47,6 +47,8 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 | `artifacts_lib/` | Artifact schema (Pydantic), versioned storage, lint (`validate`) and structured diff |
 | `agent/` | Discovery loop, tool set, Gemini client, recorder, capability catalog |
 | `replay/` | Deterministic replay engine, templating, input validation, result types |
+| `mcp_server.py` | MCP server: the recorded capabilities as tools for any MCP-capable assistant (a thin client of `/v1`) |
+| `observability.py` | Structured JSON logging with a run id on every line |
 | `surface/` | Surface interface and the Playwright implementation, aria parsing, locator resolution, browser pool |
 | `safety/` | Allowlist, risk classifier, combined policy, and `policy.yaml` (approvals, caps, redaction) |
 | `runs/` | SQLite run store (runs, idempotency keys, approvals, repair proposals, canary history, API keys) and the async run executor |
@@ -130,6 +132,55 @@ the unified UI replaces them) is unauthenticated and synchronous, and now refuse
 **Partial updates.** An update capability can mark individual fields optional (`when_present` steps and `at_least_one_of` inputs):
 `clinic.update_patient_contact` takes an MRN plus any of phone, email, address, and leaves the fields you do not send exactly as they were.
 
+### Metrics, logs and traces
+
+```bash
+uv run python cli.py metrics --hours 24       # per capability: runs, success, failure, needs_review, escalation, p50/p95 latency
+curl -s localhost:8020/v1/metrics -H "Authorization: Bearer $VIC"        # the same as JSON
+curl -s localhost:8020/v1/metrics.prom -H "Authorization: Bearer $VIC"   # Prometheus text format, for anything that scrapes
+```
+
+The figures come from the run store, and `runs/metrics.py` states exactly how each is defined (a business outcome counts as a good answer,
+`needs_review` is counted separately, pending approvals are excluded from the rates).
+
+The API server logs one JSON line per event to stderr (`run.accepted`, `run.started`, `run.finished`, `approval.decided`, `repair.proposed`,
+`http.request`, `auth.rejected` ...), each tagged with its `run_id` and the key's name. Parameter values and keys are never logged, only
+parameter names. `LOG_FORMAT=text` and `LOG_LEVEL=DEBUG` change the format and level. The CLI stays quiet unless you set `LOG_LEVEL`.
+
+A failed run against a sandbox target keeps a Playwright trace: `evidence/<run>/trace.zip` (also `GET /v1/runs/{id}/trace`, operators and above).
+Open it with `uv run playwright show-trace evidence/<run>/trace.zip` for a timeline of DOM snapshots, network calls and screenshots. Traces record
+whatever was typed, passwords included, and cannot be redacted, so they are off for non-sandbox targets and kept for failures only; the `tracing`
+section of `safety/policy.yaml` changes that.
+
+### Using the platform from an AI assistant (MCP)
+
+`mcp_server.py` exposes every recorded capability as an MCP tool, with its input schema and risk metadata, so an assistant such as Claude Desktop
+can use a legacy system without a custom integration. It is a thin client of `/v1`: a call is an ordinary run with the same validation, caps,
+idempotency and approvals, made under the assistant's own API key, so the key's role is its ceiling. There is deliberately no tool to approve:
+a request that needs approval returns "pending approval" and a person approves it elsewhere. A tool that commits something requires an
+`idempotency_key`, so a retry cannot post twice. Discovery is not exposed; only recorded capabilities can be called.
+
+```bash
+uv run python cli.py keys create --name my-assistant --role operator
+```
+
+Claude Desktop (`claude_desktop_config.json`); the API server and the target must be running:
+
+```json
+{
+  "mcpServers": {
+    "capability-platform": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/computer-use-automation-system", "run", "python", "mcp_server.py"],
+      "env": {"CUA_API_URL": "http://127.0.0.1:8020", "CUA_API_KEY": "cua_..."}
+    }
+  }
+}
+```
+
+Only the stdio transport is implemented. `CUA_WAIT_SECONDS` (default 60) is how long a call waits for a run before returning its run id, and
+`CUA_TARGETS` maps a system to a target profile (default `{"clinic": "clinic", "mockbank": "mockbank"}`).
+
 ### Operating the clinic capabilities
 
 ```bash
@@ -201,7 +252,7 @@ uv run pytest
 The suite is offline: it starts MockBank and the clinic app in-process and drives a real Chromium
 against them. The live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY`
 is set, and the modern-skin browser tests skip until `clinic/modern` has been built.
-At the time of writing: 304 passing, 4 skipped without a key. The suite takes about five minutes
+At the time of writing: 329 passing, 4 skipped without a key. The suite takes about five minutes
 because it drives a real browser, including a full drift-repair loop.
 
 ## What is not done yet

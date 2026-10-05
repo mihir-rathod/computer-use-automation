@@ -25,6 +25,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
+import logging
+
+import observability
 from replay.result import ReplayResult, ReplayStatus
 
 SCHEMA = """
@@ -314,6 +317,8 @@ class RunStore:
                 db.execute("UPDATE runs SET status=?, error_code='interrupted', finished_at=? WHERE id=?",
                            (ReplayStatus.NEEDS_REVIEW.value if ambiguous else ReplayStatus.HARD_FAILURE.value, _now(), run["id"]))
             recovered.append(run["id"])
+            observability.log("run.interrupted", logging.WARNING, run_id=run["id"], capability_id=run["capability_id"],
+                              became="needs_review" if ambiguous else "hard_failure")
         return recovered
 
     # ---- repair proposals and canaries -------------------------------------------------------

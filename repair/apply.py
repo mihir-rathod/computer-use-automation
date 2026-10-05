@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import observability
 from artifacts_lib import storage
 from artifacts_lib.lint import has_errors, lint_artifact
 from repair.propose import RepairProposal
@@ -65,6 +66,8 @@ def approve_repair(
     except storage.VersionExists:
         raise ApprovalError("another repair was applied at the same moment; re-run to get a fresh proposal") from None
     store.decide_repair(proposal_id, "approved", by, reason, new_version=version)
+    observability.log("repair.approved", repair_id=proposal_id, capability_id=proposal.capability_id, step_id=proposal.step_id,
+                      from_version=base.version, to_version=version, approved_by=by, promoted=promote, method=proposal.method)
     return {"capability_id": proposal.capability_id, "from": base.version, "to": version, "promoted": promote, "step_id": proposal.step_id}
 
 
@@ -75,3 +78,4 @@ def reject_repair(store: RunStore, proposal_id: str, by: str, reason: str) -> No
     if row is None or row["status"] != "pending":
         raise ApprovalError(f"repair {proposal_id} is not pending")
     store.decide_repair(proposal_id, "rejected", by, reason)
+    observability.log("repair.rejected", repair_id=proposal_id, rejected_by=by)

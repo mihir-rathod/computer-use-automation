@@ -279,6 +279,20 @@ def cmd_canary(args: argparse.Namespace) -> int:
     return 0 if all(o.ok for o in outcomes) else 1
 
 
+def cmd_metrics(args: argparse.Namespace) -> int:
+    from runs import metrics as m
+    data = m.compute(runtime.default_store(), args.hours, args.capability)
+    pct = lambda v: "-" if v is None else f"{v * 100:.0f}%"  # noqa: E731
+    sec = lambda v: "-" if v is None else f"{v:.1f}s"  # noqa: E731
+    print(f"{'capability':<34}{'runs':>5} {'settled':>8} {'success':>8} {'failed':>7} {'review':>7} {'escal.':>7} {'p50':>7} {'p95':>7}")
+    for c in data["capabilities"]:
+        print(f"{c['capability_id']:<34}{c['runs']:>5} {c['settled']:>8} {pct(c['success_rate']):>8} {pct(c['failure_rate']):>7} {c['needs_review']:>7} "
+              f"{pct(c['escalation_rate']):>7} {sec(c['latency_s']['p50']):>7} {sec(c['latency_s']['p95']):>7}")
+    t = data["totals"]
+    print(f"\npending approvals: {t['pending_approvals']}   pending repairs: {t['pending_repairs']}   failing canaries: {', '.join(t['failing_canaries']) or 'none'}")
+    return 0
+
+
 def cmd_keys(args: argparse.Namespace) -> int:
     from runs.store import RunError
     store = runtime.default_store()
@@ -384,6 +398,8 @@ def cmd_artifact(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    import observability
+    observability.configure("WARNING")  # command output stays clean unless LOG_LEVEL is set
     parser = argparse.ArgumentParser(prog="cli.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -485,6 +501,11 @@ def main() -> int:
     ch.add_argument("--capability", default=None)
     ch.add_argument("--limit", type=int, default=20)
     canary_p.set_defaults(func=cmd_canary)
+
+    metrics_p = sub.add_parser("metrics", help="Per-capability success, failure, escalation and latency figures from the run store")
+    metrics_p.add_argument("--hours", type=float, default=None, help="only runs created in the last N hours")
+    metrics_p.add_argument("--capability", default=None)
+    metrics_p.set_defaults(func=cmd_metrics)
 
     keys_p = sub.add_parser("keys", help="Create, list and revoke API keys (the key's name is the identity recorded on approvals)")
     ksub = keys_p.add_subparsers(dest="keys_command", required=True)

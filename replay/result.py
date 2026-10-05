@@ -59,6 +59,7 @@ class ReplayResult(BaseModel):
     commit_step: str | None = Field(default=None, description="The irreversible step that was issued (confirmed or ambiguous).")
     dry_run: bool = False
     run_id: str | None = Field(default=None, description="Id in the run store.")
+    trace: str | None = Field(default=None, description="File name of the Playwright trace kept for this run (in its evidence directory), if any.")
     deduplicated: bool = Field(default=False, description="Answered from an earlier run with the same idempotency key; no browser was launched.")
     approval_tier: str | None = None
     repair_proposal_id: str | None = Field(default=None, description="A locator failure produced this repair proposal; nothing is changed until it is approved.")

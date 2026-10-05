@@ -16,6 +16,7 @@ concurrent requests -- no asyncio wrapping needed for something this simple.
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+import observability
 from artifacts_lib.storage import list_artifacts
 from runtime import TARGET_PROFILES, ensure_operator_console, run_replay
 
@@ -53,6 +55,7 @@ def _recover_interrupted_runs() -> None:
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
+    observability.configure("INFO")
     _recover_interrupted_runs()
     yield
 
@@ -63,6 +66,18 @@ app = FastAPI(
     description="`/v1` is the authenticated, asynchronous API (send `Authorization: Bearer <key>`; create keys with `cli.py keys create`). "
                 "`/capabilities/{id}/invoke` is the older synchronous endpoint the chatbot and dashboard still use.",
 )
+
+
+@app.middleware("http")
+async def _log_v1_requests(request, call_next):
+    """One structured line per /v1 call: who, what, status, how long. Never the body or the key."""
+    if not request.url.path.startswith("/v1"):
+        return await call_next(request)
+    started = time.monotonic()
+    response = await call_next(request)
+    observability.log("http.request", method=request.method, path=request.url.path, status=response.status_code,
+                      ms=round((time.monotonic() - started) * 1000), principal=getattr(request.state, "principal", None))
+    return response
 
 
 app.include_router(chatbot_router)

@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import logging
+
+import observability
 import runtime
 from artifacts_lib import storage
 from artifacts_lib.schema import Artifact, StepRiskLevel
@@ -50,6 +53,8 @@ def run_canary(artifact: Artifact, *, target: str, store: RunStore | None = None
     ok = result.status in (ReplayStatus.SUCCESS, ReplayStatus.BUSINESS_OUTCOME) and not problems
     detail = "ok" if ok else (result.error.message if result.error else "; ".join(problems) or result.status.value)
     outcome = CanaryOutcome(artifact.capability_id, artifact.version, ok, result.status.value, detail, result.run_id, result.repair_proposal_id)
+    observability.log("canary.result", logging.INFO if ok else logging.WARNING, capability_id=outcome.capability_id, version=outcome.version,
+                      ok=ok, status=outcome.status, repair_proposal_id=outcome.repair_proposal_id)
     store.record_canary(outcome.capability_id, outcome.version, ok, outcome.status, detail, outcome.run_id, outcome.repair_proposal_id)
     return outcome
 

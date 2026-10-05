@@ -17,6 +17,7 @@ until a human resumes it.
 from __future__ import annotations
 
 import atexit
+import contextvars
 import os
 import queue
 import threading
@@ -128,7 +129,8 @@ class BrowserPool:
         if self._closed:
             raise PoolClosed("the browser pool is shut down")
         future: Future[T] = Future()
-        self._jobs.put((fn, future, default_timeout_ms))
+        ctx = contextvars.copy_context()  # so log lines written on the worker thread still carry the caller's run id
+        self._jobs.put((lambda page: ctx.run(fn, page), future, default_timeout_ms))
         return future
 
     def run(self, fn: Callable[[Page], T], default_timeout_ms: int | None = None) -> T:

@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -28,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+import observability
 import runtime
 from artifacts_lib import storage
 from artifacts_lib.diff import diff_artifacts
@@ -70,12 +73,15 @@ class Principal:
 _bearer = HTTPBearer(auto_error=False, description="An API key from `cli.py keys create`.")
 
 
-def principal(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal:
+def principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal:
     if credentials is None:
+        observability.log("auth.rejected", logging.WARNING, reason="no_key", path=request.url.path)
         raise HTTPException(401, "send your API key as 'Authorization: Bearer <key>'", headers={"WWW-Authenticate": "Bearer"})
     row = runtime.default_store().authenticate(credentials.credentials.strip())
     if row is None:
+        observability.log("auth.rejected", logging.WARNING, reason="unknown_or_revoked_key", path=request.url.path)
         raise HTTPException(401, "unknown or revoked API key", headers={"WWW-Authenticate": "Bearer"})
+    request.state.principal = row["name"]
     return Principal(row["name"], row["role"])
 
 
@@ -110,6 +116,7 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
     out["committed"] = bool(out["committed"])
     out["params"] = _mask(json.loads(row["params_json"]))
     out["evidence"] = Path(row["evidence_dir"]).name if row.get("evidence_dir") else None
+    out["has_trace"] = bool(row.get("evidence_dir")) and (Path(row["evidence_dir"]) / "trace.zip").exists()
     if detail:
         out["approvals"] = store.approvals_for(row["id"])
         result = store.stored_result(row)
@@ -182,6 +189,19 @@ def list_runs(status: str | None = None, capability_id: str | None = None, limit
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
     return run_view(_get_run(run_id), detail=True)
+
+
+@router.get("/runs/{run_id}/trace")
+def trace(run_id: str, who: Principal = Depends(require("operator"))):
+    """The run's Playwright trace (kept for failures against sandbox targets by default). Open it with `playwright show-trace`.
+    Operators and above only: it records everything that was typed."""
+    from fastapi.responses import FileResponse
+    row = _get_run(run_id)
+    path = Path(row["evidence_dir"]) / "trace.zip" if row.get("evidence_dir") else None
+    if path is None or not path.exists():
+        raise HTTPException(404, f"run {run_id} has no trace (policy keeps them for failures on sandbox targets)")
+    observability.log("trace.downloaded", run_id=run_id, by=who.name)
+    return FileResponse(path, media_type="application/zip", filename=f"{run_id}-trace.zip")
 
 
 @router.post("/runs/{run_id}/cancel")
@@ -318,6 +338,26 @@ def me(who: Principal = Depends(principal)) -> dict[str, str]:
 def health() -> dict[str, Any]:
     store = runtime.default_store()
     return {"ok": True, "browser_pool": runtime.get_pool().stats(), "runs_active": len(store.list_runs(status="running", limit=500)) + len(store.list_runs(status="queued", limit=500))}
+
+
+# ---- metrics ----------------------------------------------------------------------------------------------------------
+
+@router.get("/metrics")
+def metrics(since_hours: float | None = Query(None, gt=0), capability_id: str | None = None,
+            _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
+    """Per-capability success, failure, escalation and latency figures computed from the run store (definitions in runs/metrics.py)."""
+    from runs import metrics as m
+    out = m.compute(runtime.default_store(), since_hours, capability_id)
+    out["browser_pool"] = runtime.get_pool().stats()
+    return out
+
+
+@router.get("/metrics.prom")
+def metrics_prom(_: Principal = Depends(require("viewer"))):
+    from fastapi.responses import PlainTextResponse
+    from runs import metrics as m
+    pool = runtime.get_pool().stats()
+    return PlainTextResponse(m.prometheus(m.compute(runtime.default_store()), pool), media_type="text/plain; version=0.0.4")
 
 
 # ---- repairs ---------------------------------------------------------------------------------------------------------

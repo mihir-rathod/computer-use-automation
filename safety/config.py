@@ -49,8 +49,17 @@ class RedactionConfig(BaseModel):
         return v
 
 
+class TracingConfig(BaseModel):
+    """Playwright traces (a timeline of DOM snapshots, network calls and screenshots) are the best debugging evidence a failed run can
+    leave, but they record everything typed, including secrets, and cannot be redacted. So by default they are kept for failures only,
+    and only against sandbox targets."""
+    mode: Literal["off", "failures", "always"] = "failures"
+    non_sandbox: bool = Field(default=False, description="Also trace targets that are not marked sandbox. Off by default: a trace contains typed passwords.")
+
+
 class PolicyConfig(BaseModel):
     version: Literal[1] = 1
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
     approvers: dict[str, Role] = Field(default_factory=dict)
     capabilities: dict[str, CapabilityPolicy] = Field(default_factory=dict)
     risk_keywords: RiskKeywords = Field(default_factory=RiskKeywords)

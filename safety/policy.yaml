@@ -34,6 +34,13 @@ capabilities:
   clinic.update_patient_contact:
     approval: live
 
+# Playwright traces: a timeline of DOM snapshots, network calls and screenshots, stored as trace.zip in a run's evidence directory
+# and opened with `playwright show-trace`. They record everything typed, passwords included, and cannot be redacted, so the default is
+# failures only, and only against sandbox targets. mode: off | failures | always.
+tracing:
+  mode: failures
+  non_sandbox: false
+
 # Words that make an action irreversible. These extend, never replace, the built-in lists in safety/risk.py.
 risk_keywords:
   commit: [approve, reject]

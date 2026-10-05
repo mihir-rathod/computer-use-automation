@@ -9,6 +9,7 @@ exact same logic -- before that there was nothing to share yet.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 import os
@@ -24,6 +25,7 @@ from playwright.sync_api import sync_playwright
 
 from artifacts_lib.storage import DEFAULT_ARTIFACTS_DIR, load_artifact_by_id
 from artifacts_lib.schema import Artifact
+import observability
 from escalation.operator_console import app as operator_app
 from escalation.registry import register_session, unregister_session
 from escalation.session_manager import SessionManager
@@ -272,6 +274,7 @@ def prepare_run(
         # A request that cannot possibly run must not reach an approver's queue or burn an idempotency key.
         problems = validate_input(artifact.input_schema, params)
         if problems:
+            observability.log("run.refused", code="input_invalid", capability_id=capability_id, requested_by=requested_by, problems=len(problems))
             return Early(_early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(message="; ".join(problems), code="input_invalid")), evidence_dir)
         profile_app = TARGET_PROFILES.get(target or "mockbank", {}).get("app_id")
         if profile_app and artifact.target.app_id != profile_app:
@@ -286,6 +289,7 @@ def prepare_run(
             violations.append(PolicyViolation("policy_cap_exceeded", f"{capability_id} already committed {cap} time(s) today, the policy limit"))
         if violations:
             claim = store.begin(capability_id, artifact.version, params, requested_by, None, evidence_dir=str(evidence_dir), target=target)
+            observability.log("run.refused", code=violations[0].code, run_id=claim.run["id"], capability_id=capability_id, requested_by=requested_by)
             result = _early_result(artifact, ReplayStatus.HARD_FAILURE, claim.run["id"],
                                    error=ReplayError(message="; ".join(v.message for v in violations), code=violations[0].code))
             store.finish(claim.run["id"], result, str(evidence_dir))
@@ -295,6 +299,9 @@ def prepare_run(
         needs_approval = tier in ("operator", "supervisor")
         claim = store.begin(capability_id, artifact.version, params, requested_by, None if dry_run else idempotency_key,
                             status=PENDING_APPROVAL if needs_approval else (QUEUED if queued else RUNNING), evidence_dir=str(evidence_dir), target=target)
+        if claim.kind in ("replay", "conflict"):
+            observability.log("run.idempotency_" + ("hit" if claim.kind == "replay" else "conflict"), run_id=claim.run["id"] if claim.run else None,
+                              capability_id=capability_id, requested_by=requested_by)
         if claim.kind == "replay":
             stored = store.stored_result(claim.run)
             if stored is not None:
@@ -308,14 +315,18 @@ def prepare_run(
                                    error=ReplayError(message=claim.reason, code="idempotency_conflict"))
             return Early(result, Path(existing.get("evidence_dir") or evidence_dir))
         run_id_ = claim.run["id"]
+        observability.log("run.accepted", run_id=run_id_, capability_id=capability_id, version=artifact.version, requested_by=requested_by,
+                          target=target, approval_tier=tier, params=sorted(params), dry_run=dry_run, queued=queued)
         if needs_approval:
             store.request_approval(run_id_, tier, requested_by)
             result = _early_result(artifact, ReplayStatus.PENDING_APPROVAL, run_id_, approval_tier=tier)
             _write_evidence(evidence_dir, artifact, params, result, policy, target, dry_run, note=f"waiting for a {tier} approval")
             return Early(result, evidence_dir)
 
-    def execute(cancel_event_: threading.Event | None = None) -> ReplayResult:
+    def _body(cancel_event_: threading.Event | None) -> ReplayResult:
         store.mark_running(run_id_)
+        observability.log("run.started", capability_id=capability_id, target=target)
+        started_clock = time.monotonic()
         try:
             result = _replay_in_browser(
                 artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
@@ -327,6 +338,7 @@ def prepare_run(
         except Exception as exc:  # noqa: BLE001
             # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
             # stays "running" for ever and its idempotency key is blocked. Close it as a failure and report it as one.
+            observability.log("run.runner_error", logging.ERROR, error_type=type(exc).__name__)
             result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=ReplayError(
                 code="runner_error", message=f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else exc}"))
         result.run_id, result.approval_tier = run_id_, tier
@@ -334,9 +346,16 @@ def prepare_run(
         evidence_dir.mkdir(parents=True, exist_ok=True)
         redactor = Redactor.from_config(policy.redaction)
         (evidence_dir / "result.json").write_text(json.dumps(redactor.scrub(json.loads(result.model_dump_json())), indent=2))
+        bad = result.status in (ReplayStatus.HARD_FAILURE, ReplayStatus.NEEDS_REVIEW)
+        observability.log("run.finished", logging.WARNING if bad else logging.INFO, capability_id=capability_id, status=result.status.value,
+                          duration_s=round(time.monotonic() - started_clock, 3), committed=result.committed, escalated=result.escalated,
+                          recovered=result.recovered, error_code=result.error.code if result.error else None,
+                          steps_completed=len(result.steps_completed), repair_proposal_id=result.repair_proposal_id, trace=bool(result.trace))
         return result
 
-
+    def execute(cancel_event_: threading.Event | None = None) -> ReplayResult:
+        with observability.bind(run_id=run_id_):
+            return _body(cancel_event_)
 
     return Prepared(run_id_, evidence_dir, execute)
 
@@ -355,6 +374,8 @@ def _repair_hook(store: RunStore, run_id_: str, use_llm: bool):
         if proposal is None:
             return None
         store.save_repair(proposal)
+        observability.log("repair.proposed", logging.WARNING, repair_id=proposal.id, capability_id=proposal.capability_id,
+                          step_id=proposal.step_id, confident=proposal.confident, method=proposal.method)
         return proposal.id
 
     return hook
@@ -399,7 +420,33 @@ def _replay_in_browser(
     if enable_operator_console:
         ensure_operator_console(operator_port)
 
+    trace_on = policy.tracing.mode != "off" and (bool(profile.get("sandbox")) or policy.tracing.non_sandbox)
+
     def _job(page: Any) -> ReplayResult:
+        """Runs the replay, with a Playwright trace around it when policy allows; the trace is kept only if it is wanted."""
+        if not trace_on:
+            return _job_inner(page)
+        context = page.context
+        context.tracing.start(screenshots=True, snapshots=True, sources=False)
+        result: ReplayResult | None = None
+        try:
+            result = _job_inner(page)
+            return result
+        finally:
+            keep = result is not None and (policy.tracing.mode == "always" or result.status in (ReplayStatus.HARD_FAILURE, ReplayStatus.NEEDS_REVIEW))
+            try:
+                if keep:
+                    evidence_dir.mkdir(parents=True, exist_ok=True)
+                    path = evidence_dir / "trace.zip"
+                    context.tracing.stop(path=str(path))
+                    path.chmod(0o600)  # it holds whatever was typed
+                    result.trace = path.name
+                else:
+                    context.tracing.stop()
+            except Exception:  # noqa: BLE001 -- a trace is a convenience; never let it break the run
+                observability.log("trace.failed", logging.WARNING)
+
+    def _job_inner(page: Any) -> ReplayResult:
         session = None
         try:
             page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
@@ -415,6 +462,8 @@ def _replay_in_browser(
                 if repair_hook is not None and err.code == "locator_unresolved":
                     failed.repair_proposal_id = repair_hook(login_artifact, err.step_id, surface)
                 return failed
+
+            observability.log("run.signed_in", target=target, login_capability=profile["login_capability"])
 
             if enable_operator_console:
                 session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None)

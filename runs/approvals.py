@@ -3,7 +3,10 @@ this adds the policy check that the approver is on the roster at a high enough t
 (CLI today, the API later) goes through `decide_run` so none of them can skip the roster check."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
+
+import observability
 
 from runs.store import ApprovalError, NotPermitted, RunStore
 from safety.config import PolicyConfig, may_approve, role_allows
@@ -20,7 +23,9 @@ def resolve_run(store: RunStore, policy: PolicyConfig, run_id: str, outcome: Lit
     allowed, why = role_allows(role, "operator" if tier == "live" else tier) if role else may_approve(policy, by, "operator" if tier == "live" else tier)
     if not allowed:
         raise NotPermitted(why)
-    return store.resolve(run_id, outcome, by, reason)
+    settled = store.resolve(run_id, outcome, by, reason)
+    observability.log("run.resolved", logging.WARNING, run_id=run_id, capability_id=run["capability_id"], outcome=outcome, resolved_by=by)
+    return settled
 
 
 def decide_run(store: RunStore, policy: PolicyConfig, run_id: str, decision: Literal["approved", "rejected"], by: str, reason: str,
@@ -32,4 +37,7 @@ def decide_run(store: RunStore, policy: PolicyConfig, run_id: str, decision: Lit
     allowed, why = role_allows(role, open_request["tier"]) if role else may_approve(policy, by, open_request["tier"])
     if not allowed:
         raise NotPermitted(why)
-    return store.decide(run_id, decision, by, reason)
+    run = store.decide(run_id, decision, by, reason)
+    observability.log("approval.decided", run_id=run_id, capability_id=run["capability_id"], decision=decision, decided_by=by,
+                      role=role or policy.approvers.get(by), tier=open_request["tier"], requested_by=run["requested_by"])
+    return run
