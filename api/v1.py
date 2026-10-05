@@ -114,6 +114,8 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
     out = {k: row[k] for k in ("id", "capability_id", "version", "status", "requested_by", "target", "idempotency_key", "committed",
                                "commit_step", "error_code", "created_at", "started_at", "finished_at", "resolution")}
     out["committed"] = bool(out["committed"])
+    out["pace_ms"] = int(row.get("pace_ms") or 0)
+    out["show_window"] = bool(row.get("show_window"))
     out["params"] = _mask(json.loads(row["params_json"]))
     out["evidence"] = Path(row["evidence_dir"]).name if row.get("evidence_dir") else None
     out["has_trace"] = bool(row.get("evidence_dir")) and (Path(row["evidence_dir"]) / "trace.zip").exists()
@@ -135,12 +137,27 @@ def _get_run(run_id: str) -> dict[str, Any]:
 
 # ---- runs -------------------------------------------------------------------------------------------------------------
 
+MAX_PACE_MS = 3000
+
+
+def window_allowed() -> bool:
+    """A visible browser window opens on the *server's* screen, so it only makes sense when the server is the machine in front of you. Off unless enabled."""
+    return os.environ.get("CUA_ALLOW_WINDOW") == "1"
+
+
+def check_watch(pace_ms: int, show_window: bool) -> None:
+    if show_window and not window_allowed():
+        raise HTTPException(422, "showing a browser window is not enabled on this server (set CUA_ALLOW_WINDOW=1 when it runs on the machine you are using)")
+
+
 class SubmitRun(BaseModel):
     capability_id: str
     params: dict[str, Any] = Field(default_factory=dict)
     target: str = Field(description="A target profile name, see GET /v1/targets. The caller cannot supply a URL or credentials.")
     version: str | None = Field(default=None, description="A specific artifact version; default is the current one.")
     dry_run: bool = Field(default=False, description="Run up to, not including, the first irreversible step; nothing is committed.")
+    pace_ms: int = Field(default=0, ge=0, le=MAX_PACE_MS, description="Watch mode: pause this long around each action and outline the element it touches, so a person can follow the run.")
+    show_window: bool = Field(default=False, description="Also open a visible browser window on the machine the server runs on. Only when the server allows it (see /v1/features).")
 
 
 class Decision(BaseModel):
@@ -167,9 +184,11 @@ def submit_run(body: SubmitRun, idempotency_key: str | None = Header(default=Non
 
     if body.target not in runtime.TARGET_PROFILES:
         raise HTTPException(422, f"unknown target '{body.target}'; known: {sorted(runtime.TARGET_PROFILES)}")
+    check_watch(body.pace_ms, body.show_window)
     try:
         prepared = runtime.prepare_run(body.capability_id, body.params, target=body.target, requested_by=who.name, idempotency_key=idempotency_key,
-                                       dry_run=body.dry_run, enable_operator_console=False, queued=True, version=body.version, artifacts_dir=adir())
+                                       dry_run=body.dry_run, enable_operator_console=False, queued=True, version=body.version, artifacts_dir=adir(),
+                                       pace_ms=body.pace_ms, show_window=body.show_window)
     except (FileNotFoundError, storage.UnknownVersion):
         raise HTTPException(404, f"unknown capability or version '{body.capability_id}' {body.version or ''}".strip()) from None
     if isinstance(prepared, runtime.Early):
@@ -181,14 +200,47 @@ def submit_run(body: SubmitRun, idempotency_key: str | None = Header(default=Non
 
 
 @router.get("/runs")
-def list_runs(status: str | None = None, capability_id: str | None = None, limit: int = Query(50, ge=1, le=500),
-              _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
-    return {"runs": [run_view(r) for r in runtime.default_store().list_runs(capability_id, status, limit)]}
+def list_runs(status: str | None = None, capability_id: str | None = None, requested_by: str | None = None, q: str | None = None,
+              limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
+    return {"runs": [run_view(r) for r in runtime.default_store().list_runs(capability_id, status, limit, requested_by, q, offset)]}
 
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
     return run_view(_get_run(run_id), detail=True)
+
+
+@router.get("/runs/{run_id}/timeline")
+def timeline(run_id: str, _: Principal = Depends(require("viewer"))) -> dict[str, Any]:
+    """The run's steps as the artifact defined them, with each one's outcome, expected result and (when kept) screenshot. For the step that
+    failed: what was expected against what actually happened."""
+    from api import timeline as tl
+    row = _get_run(run_id)
+    try:
+        artifact = storage.load_artifact_by_id(row["capability_id"], adir(), version=row["version"])
+    except (FileNotFoundError, storage.UnknownVersion):
+        artifact = None
+    stored = runtime.default_store().stored_result(row)
+    evidence = Path(row["evidence_dir"]) if row.get("evidence_dir") else None
+    out = tl.build(evidence, artifact, stored.model_dump(mode="json") if stored else None)
+    out["screenshots"] = tl.screenshot_names(evidence)
+    return out
+
+
+_SHOT = __import__("re").compile(r"^[0-9]{3,}\.png$")
+
+
+@router.get("/runs/{run_id}/screenshots/{name}")
+def screenshot(run_id: str, name: str, _: Principal = Depends(require("operator"))):
+    """A screenshot kept as evidence. Operators and above: it shows whatever the page showed, and cannot be redacted."""
+    from fastapi.responses import FileResponse
+    row = _get_run(run_id)
+    if not _SHOT.match(name) or not row.get("evidence_dir"):
+        raise HTTPException(404, "no such screenshot")
+    path = Path(row["evidence_dir"]) / "screenshots" / name
+    if not path.exists():
+        raise HTTPException(404, "no such screenshot")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/runs/{run_id}/trace")
@@ -305,8 +357,17 @@ def capability_view(artifact: Any, detail: bool = False) -> dict[str, Any]:
         "input_schema": artifact.input_schema.model_dump(), "output_schema": artifact.output_schema.model_dump(),
     }
     if detail:
+        from api import timeline as tl
         out["provenance"] = artifact.provenance.model_dump(mode="json")
         out["history"] = storage.history(artifact.capability_id, adir())
+        out["steps"] = [{
+            "step_id": s.step_id, "action": s.action.value, "description": tl.describe_step(s), "risk": s.risk_level.value, "idempotent": s.idempotent,
+            "optional_input": s.when_present, "expected": tl.describe_signal(s.checkpoint),
+            "locators": [{"strategy": l.strategy.value, "value": l.value} for l in (s.target.locators if s.target else [])],
+            "output": s.output_binding} for s in artifact.steps]
+        out["success_when"] = tl.describe_signal(artifact.success_checkpoint)
+        out["business_outcomes"] = [{"when": tl.describe_signal(r.signal), "outcome": r.outcome} for r in artifact.error_handling.business_outcomes]
+        out["recoverable"] = [{"when": tl.describe_signal(r.signal), "action": r.action.value, "attempts": r.max_attempts} for r in artifact.error_handling.recoverable]
     return out
 
 
@@ -334,10 +395,61 @@ def me(who: Principal = Depends(principal)) -> dict[str, str]:
     return {"name": who.name, "role": who.role}
 
 
+@router.get("/features")
+def features(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
+    """What this server can do for the console: whether it may open a visible browser window, and the watch-mode pace limits."""
+    return {"show_window": window_allowed(), "max_pace_ms": MAX_PACE_MS, "watch_presets": {"slow": 700, "step_by_step": 1800}}
+
+
 @router.get("/health")
 def health() -> dict[str, Any]:
     store = runtime.default_store()
     return {"ok": True, "browser_pool": runtime.get_pool().stats(), "runs_active": len(store.list_runs(status="running", limit=500)) + len(store.list_runs(status="queued", limit=500))}
+
+
+# ---- policy and keys ---------------------------------------------------------------------------------------------------
+
+@router.get("/policy")
+def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """The safety policy as it is right now (the file is re-read on every run). Read-only here: it is changed by editing safety/policy.yaml."""
+    p = runtime.default_policy()
+    return {
+        "approvers": p.approvers,
+        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
+        "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
+        "risk_keywords": p.risk_keywords.model_dump(),
+        "redaction": {"patterns": sorted(p.redaction.patterns), "field_names": p.redaction.field_names},
+        "approval_tiers": {"live": "blocked until a person confirms it on the operator console, mid-run",
+                           "operator": "needs a recorded approval from an operator or above, other than the requester",
+                           "supervisor": "needs a recorded approval from a supervisor or admin, other than the requester"},
+    }
+
+
+class NewKey(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    role: Literal["viewer", "operator", "supervisor", "admin"]
+
+
+@router.get("/keys")
+def keys(_: Principal = Depends(require("admin"))) -> dict[str, Any]:
+    return {"keys": runtime.default_store().list_keys()}
+
+
+@router.post("/keys", status_code=201)
+def create_key(body: NewKey, who: Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """The key is returned once and only its hash is kept."""
+    key = runtime.default_store().create_key(body.name, body.role)
+    observability.log("key.created", name=body.name, role=body.role, created_by=who.name)
+    return {"name": body.name, "role": body.role, "key": key}
+
+
+@router.post("/keys/{name}/revoke")
+def revoke_key(name: str, who: Principal = Depends(require("admin"))) -> dict[str, Any]:
+    if name == who.name:
+        raise HTTPException(409, "you cannot revoke the key you are using")
+    n = runtime.default_store().revoke_key(name)
+    observability.log("key.revoked", name=name, revoked_by=who.name, count=n)
+    return {"name": name, "revoked": n}
 
 
 # ---- metrics ----------------------------------------------------------------------------------------------------------
@@ -360,6 +472,29 @@ def metrics_prom(_: Principal = Depends(require("viewer"))):
     return PlainTextResponse(m.prometheus(m.compute(runtime.default_store()), pool), media_type="text/plain; version=0.0.4")
 
 
+# ---- inbox -----------------------------------------------------------------------------------------------------------------
+
+@router.get("/inbox")
+def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
+    """Everything waiting for a person: approvals, runs whose commit outcome is unknown, and repair proposals. One call, so the console can
+    show a badge and the inbox page from the same data."""
+    store = runtime.default_store()
+    approvals_ = [{"run_id": a["run_id"], "capability_id": a["capability_id"], "tier": a["tier"], "requested_by": a["requested_by"],
+                   "requested_at": a["requested_at"], "params": _mask(json.loads(a["params_json"]))} for a in store.pending_approvals()]
+    reviews = [run_view(r) for r in store.unresolved_reviews()]
+    repairs_ = []
+    for r in store.list_repairs("pending"):
+        p = RepairProposal.model_validate_json(r["proposal_json"])
+        repairs_.append({"id": r["id"], "capability_id": r["capability_id"], "step_id": r["step_id"], "run_id": r["run_id"], "created_at": r["created_at"],
+                         "confident": bool(r["confident"]), "reason": p.reason, "touches_irreversible_step": p.touches_irreversible_step,
+                         "old_locators": [{"strategy": l.strategy.value, "value": l.value} for l in p.old_target.locators],
+                         "new_locators": [{"strategy": l.strategy.value, "value": l.value} for l in (p.new_target.locators if p.new_target else [])],
+                         "candidates": [c.model_dump() for c in p.candidates[:4]], "has_screenshot": bool(p.screenshot), "page_url": p.page_url,
+                         "description": p.old_target.semantic_description})
+    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_,
+            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "total": len(approvals_) + len(reviews) + len(repairs_)}}
+
+
 # ---- repairs ---------------------------------------------------------------------------------------------------------
 
 @router.get("/repairs")
@@ -376,6 +511,21 @@ def repair(repair_id: str, _: Principal = Depends(require("viewer"))) -> dict[st
         raise HTTPException(404, f"unknown repair {repair_id}")
     return {"status": row["status"], "decided_by": row["decided_by"], "reason": row["reason"], "new_version": row["new_version"],
             "proposal": RepairProposal.model_validate_json(row["proposal_json"]).model_dump(mode="json")}
+
+
+@router.get("/repairs/{repair_id}/screenshot")
+def repair_screenshot(repair_id: str, _: Principal = Depends(require("operator"))):
+    """The page as it looked where the step failed, for the person reviewing the proposal."""
+    from fastapi.responses import FileResponse
+    row = runtime.default_store().get_repair(repair_id)
+    if row is None:
+        raise HTTPException(404, f"unknown repair {repair_id}")
+    path = Path(RepairProposal.model_validate_json(row["proposal_json"]).screenshot or "")
+    run = runtime.default_store().get(row["run_id"]) if row["run_id"] else None
+    allowed = Path(run["evidence_dir"]).resolve() if run and run.get("evidence_dir") else None
+    if not path.is_file() or allowed is None or not path.resolve().is_relative_to(allowed):
+        raise HTTPException(404, "this proposal has no screenshot")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.post("/repairs/{repair_id}/approve")

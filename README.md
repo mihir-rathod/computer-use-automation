@@ -8,7 +8,7 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 > app and against a purpose-built clinic app with fault injection, UI drift and an audit log. Eight
 > clinic capabilities have been discovered by the LLM and replay deterministically, with versioned
 > artifacts, approvals, idempotency keys, locator repair proposals and canaries around them. An async
-> authenticated async API with metrics, structured logs, failure traces and an MCP server are in place. A unified UI and a measured benchmark are still to come. See
+> authenticated async API with metrics, structured logs, failure traces and an MCP server are in place, and a single web console (task-first catalog, runs with step timelines and screenshots, an operator inbox, artifact inspector, chat) sits on top of it. A measured benchmark is still to come. See
 > [WRITEUP.md](WRITEUP.md) for the design, the incidents, the measured drift results and an honest
 > list of what is not done.
 
@@ -47,6 +47,7 @@ loop, no tokens spent, with safety gating, human escalation and a full evidence 
 | `artifacts_lib/` | Artifact schema (Pydantic), versioned storage, lint (`validate`) and structured diff |
 | `agent/` | Discovery loop, tool set, Gemini client, recorder, capability catalog |
 | `replay/` | Deterministic replay engine, templating, input validation, result types |
+| `ui/` | The web console: a Next.js (React, TypeScript) static export served by the API under `/ui` |
 | `mcp_server.py` | MCP server: the recorded capabilities as tools for any MCP-capable assistant (a thin client of `/v1`) |
 | `observability.py` | Structured JSON logging with a run id on every line |
 | `surface/` | Surface interface and the Playwright implementation, aria parsing, locator resolution, browser pool |
@@ -103,6 +104,46 @@ uv run python cli.py replay --capability mockbank.member_balance_lookup --param 
 ```
 
 MockBank's demo login is `operator` / `bankdemo123` (a fixture credential, not a secret).
+
+### The console
+
+One web app over `/v1`, served by the API server itself under `/ui` once it has been built:
+
+```bash
+cd ui && npm install && npm run build          # once, and again after UI changes
+uv run uvicorn api.app:app --port 8020          # then open http://localhost:8020/ui/
+```
+
+Sign in with an API key (create one with `cli.py keys create`). What you see follows your role, and everyone lands on the same place: a search box asking
+what you want to do, with tasks grouped by what they do (look something up, change something, needs an approval first).
+
+| Role | Sees |
+|---|---|
+| operator, supervisor | Tasks, My runs, Inbox (the badge counts only what *you* can decide), Chat |
+| viewer | Tasks and Runs, read-only |
+| admin | The above, plus a **Manage** section: Overview (metrics), Artifacts, Policy, API keys |
+
+The role decides visibility only; the API enforces every permission itself.
+
+**Watch it run.** On a task form, and in chat, choose *Slow* or *Step by step*. The run is paced (a pause around each action) and the element it is about to
+touch is outlined in amber, with a live view on the run page that follows the steps. It never changes what the run does, and sign-on is not slowed. Screenshots
+for the live view are kept for sandbox targets only. If the server runs on the machine you are sitting at, start it with `CUA_ALLOW_WINDOW=1` and an option
+appears to also open a real browser window; closing the window (or Cmd+Q) releases it.
+
+| Page | What it is for |
+|---|---|
+| Tasks (home) | A task search. Opening a task shows a form generated from its input schema, with what will happen, what approval it needs, and the watch option |
+| Overview (admin) | Success, failure, escalation and latency per capability, and a banner when something needs a person or a canary is failing |
+| Runs | Every run with filters. A run shows live progress, each step with the page as it looked afterwards, and for a failed step what was expected against what happened |
+| Inbox | Approvals, runs whose commit outcome is unknown, and repair proposals, with who asked and how long each has waited. Decisions need a reason and are recorded with your name |
+| Artifacts | A capability's steps, how each element is found, provenance, version history, side-by-side diff, promote and roll back |
+| Chat | A shortcut for one-off requests. Starts only recorded tasks, asks when something is missing, can never approve; history is saved per key and can be cleared, and a half-typed message survives switching pages |
+| Policy, API keys | The safety policy (read-only) and key management (admin) |
+
+Keyboard: `g` then a letter shown in `?` to jump between pages, `/` to search, `?` for help. It follows your system's light or dark theme and can be switched.
+For development, `cd ui && npm run dev` serves it on port 3000 and proxies `/v1` to a running API on 8020.
+
+The older server-rendered chat (`/chat`) and dashboard (`/dashboard`) still work but are superseded by the console.
 
 ### The v1 API
 
@@ -252,7 +293,7 @@ uv run pytest
 The suite is offline: it starts MockBank and the clinic app in-process and drives a real Chromium
 against them. The live-model tests (discovery, chatbot) skip automatically unless `GEMINI_API_KEY`
 is set, and the modern-skin browser tests skip until `clinic/modern` has been built.
-At the time of writing: 329 passing, 4 skipped without a key. The suite takes about five minutes
+At the time of writing: 374 passing, 4 skipped without a key. The suite takes about five minutes
 because it drives a real browser, including a full drift-repair loop.
 
 ## What is not done yet

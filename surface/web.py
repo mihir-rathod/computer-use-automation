@@ -65,6 +65,15 @@ _CELL_FACTS_JS = """(el) => {
   return {dataValued: !el.getAttribute('aria-label'), label};
 }"""
 
+# "Watching" a run: the element about to be acted on gets an amber outline (and keeps it, so the screenshot taken after the action shows
+# what was touched), and the previous one is cleared.
+_HIGHLIGHT_JS = """(el) => {
+  document.querySelectorAll('[data-cua-hl]').forEach((n) => { n.style.outline = n.dataset.cuaPrev || ''; n.style.outlineOffset = ''; delete n.dataset.cuaHl; delete n.dataset.cuaPrev; });
+  el.dataset.cuaPrev = el.style.outline || ''; el.dataset.cuaHl = '1';
+  el.style.outline = '3px solid #f5a524'; el.style.outlineOffset = '2px';
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+}"""
+
 _ACTIONABLE_KINDS = {ActionType.CLICK, ActionType.TYPE, ActionType.SELECT, ActionType.EXTRACT, ActionType.WAIT_FOR, ActionType.DISMISS_DIALOG}
 
 
@@ -77,8 +86,15 @@ class WebSurface(Surface):
         evidence_logger: EvidenceLogger | None = None,
         safety_policy: SafetyPolicy | None = None,
         settle: SettleConfig | None = None,
+        capture_every_action: bool = False,
+        pace_ms: int = 0,
     ):
         self.page = page
+        # Watch mode: a deliberate pause before and after each action, and an outline on the element being touched. This is our own pacing,
+        # not Playwright's slow_mo, which delays every internal call (resolving, polling, settling) and makes a run crawl.
+        self.pace_ms = max(0, int(pace_ms))
+        # Evidence screenshots after every action (not just failures). Screenshots are not redactable, so this is a policy decision.
+        self.capture_every_action = capture_every_action
         self.settle = settle or SettleConfig()
         self._inflight = 0
         self._last_net_activity = time.monotonic()
@@ -121,6 +137,16 @@ class WebSurface(Surface):
             self.page.evaluate(_DOM_QUIET_JS, [self.settle.quiet_ms, max(remaining_ms, self.settle.quiet_ms)])
         except Exception:
             pass  # the page navigated mid-wait and the old context is gone; the next read will wait for the new one
+
+    def _pause(self, factor: float) -> None:
+        if self.pace_ms:
+            self.page.wait_for_timeout(int(self.pace_ms * factor))
+
+    def _highlight(self, pw_locator: Any) -> None:
+        try:
+            pw_locator.evaluate(_HIGHLIGHT_JS)
+        except Exception:
+            pass  # a decoration: never let it break the action
 
     # ---- perceive ---------------------------------------------------------------------
 
@@ -305,6 +331,7 @@ class WebSurface(Surface):
             self._dispatched = True
             self.page.goto(full_url)
             self._settle()
+            self._pause(0.5)
             return ActionResult(success=True)
 
         resolved = self._resolve(action)
@@ -312,6 +339,9 @@ class WebSurface(Surface):
             return ActionResult(success=False, error="could not resolve element", unresolved=True)
         pw_locator, resolved_target, resolved_strategy = resolved
 
+        if self.pace_ms:
+            self._highlight(pw_locator)
+            self._pause(1.0)
         if action.kind in _DISPATCHING:
             self._dispatched = True
         if action.kind in (ActionType.CLICK, ActionType.DISMISS_DIALOG):
@@ -344,6 +374,7 @@ class WebSurface(Surface):
 
         if action.kind in _SETTLE_AFTER:
             self._settle()
+        self._pause(0.5)
         return ActionResult(success=True, resolved_target=resolved_target, resolved_strategy=resolved_strategy)
 
     def _url_for_safety_check(self, action: Action) -> str:
@@ -393,11 +424,13 @@ class WebSurface(Surface):
                 result.resolved_target.semantic_description if result.resolved_target else None,
             ])) or None
             params = redact_type_params(action.params, semantic)
-        error_screenshot = self._capture_screenshot() if not result.success else None
+        error_screenshot = self._capture_screenshot() if (not result.success or self.capture_every_action) else None
         self.evidence_logger.log(
             action.actor, "action",
             action_kind=action.kind.value,
             ref=action.ref,
+            step_id=action.step_id,
+            capability_id=action.capability_id,
             target=action.target.model_dump() if action.target else None,
             params=params,
             confirmed=action.confirmed,

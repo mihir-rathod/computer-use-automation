@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TEXT,
     evidence_dir TEXT,
     result_json TEXT,
-    resolution TEXT
+    resolution TEXT,
+    pace_ms INTEGER NOT NULL DEFAULT 0,
+    show_window INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_key ON runs(capability_id, idempotency_key);
 CREATE INDEX IF NOT EXISTS runs_cap_day ON runs(capability_id, committed, finished_at);
@@ -88,6 +90,15 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TEXT,
     revoked_at TEXT
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner TEXT NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    run_id TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_owner ON chat_messages(owner, id);
 CREATE TABLE IF NOT EXISTS canary_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     capability_id TEXT NOT NULL,
@@ -151,6 +162,9 @@ class RunStore:
         columns = {r[1] for r in self._conn.execute("PRAGMA table_info(runs)")}
         if "target" not in columns:  # a database created before runs recorded which target identity they ran as
             self._conn.execute("ALTER TABLE runs ADD COLUMN target TEXT")
+        for column in ("pace_ms", "show_window"):  # watch settings arrived later
+            if column not in columns:
+                self._conn.execute(f"ALTER TABLE runs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
@@ -177,7 +191,7 @@ class RunStore:
     def begin(
         self, capability_id: str, version: str | None, params: dict[str, Any], requested_by: str,
         idempotency_key: str | None = None, status: str = RUNNING, evidence_dir: str | None = None,
-        target: str | None = None,
+        target: str | None = None, pace_ms: int = 0, show_window: bool = False,
     ) -> Claim:
         """Atomically either creates a run or says why it must not. With no key there is nothing to
         deduplicate on, so the run is always new."""
@@ -197,10 +211,10 @@ class RunStore:
                         return verdict
             run_id = new_run_id()
             db.execute(
-                "INSERT INTO runs(id,capability_id,version,idempotency_key,requested_by,params_json,status,created_at,started_at,evidence_dir,target)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO runs(id,capability_id,version,idempotency_key,requested_by,params_json,status,created_at,started_at,evidence_dir,target,pace_ms,show_window)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (run_id, capability_id, version, idempotency_key, requested_by, json.dumps(params, default=str), status, _now(),
-                 _now() if status == RUNNING else None, evidence_dir, target))
+                 _now() if status == RUNNING else None, evidence_dir, target, int(pace_ms), int(show_window)))
             return Claim("new", dict(db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()))
 
     @staticmethod
@@ -218,8 +232,15 @@ class RunStore:
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self._row("SELECT * FROM runs WHERE id=?", (run_id,))
 
-    def list_runs(self, capability_id: str | None = None, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list_runs(self, capability_id: str | None = None, status: str | None = None, limit: int = 50, requested_by: str | None = None,
+                  q: str | None = None, offset: int = 0) -> list[dict[str, Any]]:
         where, args = [], []
+        if requested_by:
+            where.append("requested_by=?")
+            args.append(requested_by)
+        if q:
+            where.append("(capability_id LIKE ? OR id LIKE ? OR requested_by LIKE ?)")
+            args += [f"%{q}%"] * 3
         if capability_id:
             where.append("capability_id=?")
             args.append(capability_id)
@@ -227,7 +248,13 @@ class RunStore:
             where.append("status=?")
             args.append(status)
         clause = f"WHERE {' AND '.join(where)}" if where else ""
-        return self._rows(f"SELECT * FROM runs {clause} ORDER BY created_at DESC, rowid DESC LIMIT ?", (*args, limit))
+        return self._rows(f"SELECT * FROM runs {clause} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?", (*args, limit, offset))
+
+    def active_window_runs(self) -> int:
+        return int(self._rows("SELECT COUNT(*) AS n FROM runs WHERE show_window=1 AND status IN (?, ?)", (QUEUED, RUNNING))[0]["n"])
+
+    def unresolved_reviews(self) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM runs WHERE status=? AND resolution IS NULL ORDER BY created_at DESC", (ReplayStatus.NEEDS_REVIEW.value,))
 
     def mark_running(self, run_id: str, evidence_dir: str | None = None) -> None:
         with self._tx() as db:
@@ -272,6 +299,21 @@ class RunStore:
             db.execute("INSERT INTO approvals(run_id,tier,requested_by,requested_at,decision,decided_by,decided_at,reason) VALUES(?,?,?,?,?,?,?,?)",
                        (run_id, "resolution", by, _now(), outcome, by, _now(), reason))
         return self.get(run_id)  # type: ignore[return-value]
+
+    # ---- chat ---------------------------------------------------------------------------------------------
+
+    def chat_add(self, owner: str, role: str, text: str, run_id: str | None = None) -> dict[str, Any]:
+        with self._tx() as db:
+            cur = db.execute("INSERT INTO chat_messages(owner, role, text, run_id, created_at) VALUES(?,?,?,?,?)", (owner, role, text, run_id, _now()))
+            return dict(db.execute("SELECT * FROM chat_messages WHERE id=?", (cur.lastrowid,)).fetchone())
+
+    def chat_list(self, owner: str, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM chat_messages WHERE owner=? ORDER BY id DESC LIMIT ?", (owner, limit))
+        return list(reversed(rows))
+
+    def chat_clear(self, owner: str) -> int:
+        with self._tx() as db:
+            return db.execute("DELETE FROM chat_messages WHERE owner=?", (owner,)).rowcount
 
     # ---- API keys ---------------------------------------------------------------------------
 

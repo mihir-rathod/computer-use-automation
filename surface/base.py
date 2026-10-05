@@ -63,6 +63,8 @@ class Action:
     params: dict[str, Any] = field(default_factory=dict)
     actor: str = "system"  # "agent" | "replay" | "human" -- who/what is driving this action
     confirmed: bool = False  # explicit approval for an irreversible action (safety/policy.py)
+    step_id: str | None = None  # which artifact step this action replays, so evidence can be joined back to the artifact
+    capability_id: str | None = None  # ...and which artifact that step belongs to (a run also replays the sign-on capability)
 
     def __post_init__(self) -> None:
         if self.kind != ActionType.NAVIGATE and self.ref is None and self.target is None:

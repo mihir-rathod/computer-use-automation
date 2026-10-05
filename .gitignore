@@ -223,3 +223,8 @@ evidence/
 clinic/modern/node_modules/
 clinic/modern/dist/
 data/
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/next-env.d.ts
+ui/tsconfig.tsbuildinfo

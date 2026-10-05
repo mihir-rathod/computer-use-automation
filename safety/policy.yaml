@@ -34,6 +34,13 @@ capabilities:
   clinic.update_patient_contact:
     approval: live
 
+# Evidence screenshots. every_action keeps a screenshot after each step so a run's timeline can show what the page looked like; errors keeps
+# one only when an action fails. Screenshots show whatever the page shows and cannot be redacted, so every_action applies to sandbox targets only
+# unless non_sandbox is true.
+evidence:
+  screenshots: every_action
+  non_sandbox: false
+
 # Playwright traces: a timeline of DOM snapshots, network calls and screenshots, stored as trace.zip in a run's evidence directory
 # and opened with `playwright show-trace`. They record everything typed, passwords included, and cannot be redacted, so the default is
 # failures only, and only against sandbox targets. mode: off | failures | always.

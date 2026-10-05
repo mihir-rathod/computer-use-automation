@@ -50,12 +50,28 @@ class TextFormatter(logging.Formatter):
         return " ".join(parts)
 
 
+class _CurrentStderr(logging.StreamHandler):
+    """Writes to whatever sys.stderr is *now*, so a stream that something later replaces and closes (a test runner's capture) cannot leave
+    the handler writing to a dead file."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def stream(self) -> Any:  # type: ignore[override]
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _: Any) -> None:
+        pass
+
+
 def configure(default_level: str = "INFO", stream: Any = None) -> None:
     """Idempotent. Safe to call from the API server's startup and from the CLI."""
     global _configured
     if _configured:
         return
-    handler = logging.StreamHandler(stream or sys.stderr)
+    handler = logging.StreamHandler(stream) if stream is not None else _CurrentStderr()
     handler.setFormatter(JsonFormatter() if os.environ.get("LOG_FORMAT", "json") == "json" else TextFormatter())
     LOGGER.handlers = [handler]
     LOGGER.setLevel(os.environ.get("LOG_LEVEL", default_level).upper())

@@ -151,6 +151,37 @@ There is no approve tool, so an assistant cannot approve its own request. A tool
 retry); a request that needs an approval returns at once as "pending approval" instead of holding the conversation open; and an unknown outcome is
 reported as an error that says not to retry.
 
+## Console decisions (phase 4)
+
+**Task-first, with chat as a supplement.** The home of the app is the catalog: pick a task and fill a form generated from its input schema (enums become
+selects, patterns become format hints and are checked in the browser with the same rules the server applies, an optional field says what leaving it
+empty means). Forms are clearer and safer than a sentence for anything that commits money. Chat is one tab: it can only start recorded tasks, checks
+every argument against the schema and refuses invented ones, shows its run inline with live status and approve buttons, and cannot approve anything.
+
+**Decisions are made where the context is.** The inbox shows each item with who asked, what for and how long it has waited, and approve, reject and
+settle all take a reason that is recorded with the person's name. Buttons are disabled with the reason when you are the requester or your role is too low,
+instead of failing after a click.
+
+**A run explains itself.** The timeline joins the artifact's steps to the evidence log: each step's outcome, a screenshot of the page after it (kept
+for sandbox targets by `evidence.screenshots` in the policy), and for the failed step what was expected against what actually happened. Progress is live
+over server-sent events read with `fetch`, because `EventSource` cannot send the API key.
+
+**One door for everyone, with the role deciding what else you see.** After the first version the console showed every role the same eight pages, which buried
+the point of the product for the person who just wants to get a job done. Everyone now lands on a task search; an operator or supervisor sees four items, a viewer
+two, and only an admin gets a Manage section (metrics, artifacts, policy, keys). The inbox badge counts only what the person can decide, so it never nags about
+something they are not allowed to act on. This is visibility, not security: the API enforces every role.
+
+**Watching a run is our own pacing, not Playwright's `slow_mo`.** `slow_mo` delays every internal call (resolving, polling, settling), so a run would crawl and
+risk its own timeouts. Watch mode instead pauses a set time around each action and outlines the element about to be touched, and the outline stays for the
+screenshot taken afterwards, so the live view shows what was just done. Sign-on is not paced. Two ways to see it: a live view in the console (works against any
+server, built on the per-step screenshots, sandbox targets only) and, only when the server runs on the person's own machine and says so (`CUA_ALLOW_WINDOW=1`), a
+real browser window. The choice is stored with the run, so it survives the wait for an approval. A smooth video of a remote browser, with the person able to
+click in it, was deliberately not attempted.
+
+**Next.js, exported statically.** The plan recommended Next.js; the app is a client-rendered tool behind a key, so it is built as a static export and
+served by the API process under `/ui`: one process, one port, nothing to deploy separately. Routes use query strings (`/run/?id=...`) because a static
+export cannot pre-render unknown ids.
+
 ## Decisions and why
 
 **The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
@@ -283,6 +314,24 @@ lost response, a lost request, a 12s stall on the commit and a session expiring 
     overrides are now refused unless a test environment variable allows them.
 
 
+Found while adding watch mode and role-based navigation:
+
+29. **Watch mode slowed the sign-on, not just the task.** The first watched run sat for ten seconds before the task's first step because the four sign-on
+    actions were paced too. Pacing now starts after sign-on.
+30. **A live view could freeze while its tab was open.** Polling was skipped whenever the tab reported itself hidden, which some embedded browsers do while
+    someone is watching. Background tabs now poll a fifth as often instead of stopping.
+31. **A test run leaked into the next test.** A chat test started a paced run and did not wait for it, so its pauses were counted by an unrelated test. Tests
+    that start background runs now wait for them.
+
+Found while building the console:
+
+27. **A sign-on failure was blamed on the task's own step.** Sign-on is itself a replayed capability whose steps are numbered s1, s2 ... like any other,
+    so the failing sign-on step s4 was matched to the requested task's s4 ("Click Select" shown as failed) and not-reached steps showed the sign-on's
+    screenshots. Recorded actions now carry the capability they belong to and the timeline shows sign-on as its own row.
+28. **The test suite could run recovery against the developer's real run database.** The in-process API server is session-scoped and starts before any
+    per-test environment is set, so its startup recovery (which closes runs a dead process left running) read `data/runs.db`. A test run beside a live
+    server could have marked its in-flight runs interrupted. The suite now points at a temporary database before anything is imported.
+
 ## Measured: drift and repair
 
 `scripts/drift_report.py` replays each clinic capability under each UI drift level against a running
@@ -312,9 +361,11 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Platform behavior | 267 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases, observability, MCP |
+| Platform behavior | 312 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases, observability, MCP |
 | Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | A retried commit posts exactly once | `tests/test_clinic_capabilities.py`: same-key retry, response lost after commit, request lost before commit; all asserted on the clinic audit log with its own duplicate guard off |
+| The console works for each role, in a real browser | `tests/ui/test_console.py`: sign-in and revoked keys, catalog filters, form validation, a live run with screenshots, a partial update, a refund held for approval then approved by a supervisor with a reason (the requester and a viewer cannot), unknown-outcome settling, drift to repair to rollback, chat history and drafts, key admin, shortcuts and theme, empty and error states |
+| Endpoints behind the console | `tests/test_ui_backend.py`: timeline, screenshot access and path safety, inbox, filters, policy, key admin, chat against a scripted model |
 | Metrics, structured logs and traces behave as documented | `tests/test_observability.py`: definitions checked against hand-built runs, run id present on every line including browser threads, no values or keys in logs, trace kept only for failures on sandbox targets |
 | An assistant can use capabilities over MCP but cannot approve | `tests/test_mcp_server.py`: a real MCP client over memory and over real stdio, against the real API, browser and clinic; refund waits for a human approval, retry with the same key posts once, lost response says do not retry |
 | An irreversible step is not retried on a guess | `tests/test_replay_hardening.py` (needs_review, RETRY rule ignored, session expiry at commit) |
@@ -367,6 +418,12 @@ These are verified against the code as of this writing.
 - **The browser pool does not cover everything.** Headed and slow-mo runs use a dedicated thread, a job
   that blocks forever holds its worker, and a paused escalation holds one until a human resumes.
   Tests print Playwright teardown noise at interpreter exit.
+- **The console is the least finished part.** The live view is a sequence of screenshots, not video, and exists for sandbox targets only; watching a real window works
+  only when the server runs on the machine you are using; there is no take-over of a run paused mid-way (v1 runs do not enable
+  the operator console, so a stuck run fails instead of pausing); an approver sees the request's inputs but not a preview of what the target will show
+  (a rehearsal run could supply that); policy is read-only in the UI; the API key sits in the browser's local storage, so it is as safe as the origin
+  is from script injection; and nothing has been checked with a screen reader beyond semantic markup, labels, focus handling and native dialogs.
+  Screenshots shown in it cannot be redacted, which is why they are kept for sandbox targets only.
 - **The older API and the chat are still in-process and synchronous.** Chat history is one global list in memory (every visitor shares
   it and a restart clears it), the page reloads itself while a run is pending, which discards a half-typed message, and the chatbot runs
   every clinic task as the front-desk account. The operator console starts at import time on a fixed port. v1 has no rate limiting.
@@ -382,6 +439,6 @@ These are verified against the code as of this writing.
 
 ## What is next
 
-One unified UI over `/v1` with a task-first catalog, an operator inbox and chat as a secondary view (phase 4); a benchmark that reports success
-rate, recovery rate and discovery cost against zero-token replay; running the supervised gate and the LLM
-repair ranker live; deploying the clinic. None of these are claimed until they are built and measured.
+A benchmark that reports success rate, recovery rate and discovery cost against zero-token replay (phase 6, with CI and a demo);
+running the supervised gate and the LLM repair ranker live; the console's missing pieces (an approver's preview, paused-run take-over, a live
+browser view); deploying the clinic. None of these are claimed until they are built and measured.

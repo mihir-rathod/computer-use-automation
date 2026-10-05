@@ -46,6 +46,7 @@ from surface.web import WebSurface
 REPO_ROOT = Path(__file__).resolve().parent
 EVIDENCE_ROOT = REPO_ROOT / "evidence"
 DEFAULT_RUN_DB = REPO_ROOT / "data" / "runs.db"
+MAX_WINDOW_RUNS = 2  # visible browser windows open at once on the server's own screen
 _stores: dict[str, RunStore] = {}
 _operator_console_started = False
 
@@ -235,6 +236,8 @@ def prepare_run(
     artifacts_dir: Path | None = None,
     queued: bool = False,
     version: str | None = None,
+    pace_ms: int = 0,
+    show_window: bool = False,
 ) -> Early | Prepared:
     """Everything that happens before a browser is needed: input validation, policy caps, the idempotency claim, the approval
     request and the run record. Returns `Early` when the answer is already known (refused, deduplicated, waiting for approval)
@@ -263,9 +266,12 @@ def prepare_run(
             raise ValueError(f"run {resume_run_id} was requested for target '{run['target']}', not '{target}'")
         target = run["target"] or target or "mockbank"
         capability_id, params = run["capability_id"], json.loads(run["params_json"])
+        pace_ms, show_window = int(run.get("pace_ms") or 0), bool(run.get("show_window"))  # watching was asked for at submit time
         artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir), version=run["version"])
         evidence_dir = Path(run["evidence_dir"])
         run_id_, tier = run["id"], (store.approvals_for(run["id"]) or [{}])[-1].get("tier")
+        if show_window and store.active_window_runs() >= MAX_WINDOW_RUNS:
+            raise ValueError(f"{MAX_WINDOW_RUNS} runs already have a browser window open on this machine; try again when one has finished")
         if not store.claim_approved(run_id_, QUEUED if queued else RUNNING):
             raise ValueError(f"run {resume_run_id} is already being executed or was executed by someone else")
     else:
@@ -296,9 +302,14 @@ def prepare_run(
             _write_evidence(evidence_dir, artifact, params, result, policy, target, dry_run, note="refused by policy before any browser started")
             return Early(result, evidence_dir)
 
+        if show_window and store.active_window_runs() >= MAX_WINDOW_RUNS:
+            result = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
+                code="window_busy", message=f"{MAX_WINDOW_RUNS} runs already have a browser window open on this machine; wait for one to finish or run without the window"))
+            return Early(result, evidence_dir)
         needs_approval = tier in ("operator", "supervisor")
         claim = store.begin(capability_id, artifact.version, params, requested_by, None if dry_run else idempotency_key,
-                            status=PENDING_APPROVAL if needs_approval else (QUEUED if queued else RUNNING), evidence_dir=str(evidence_dir), target=target)
+                            status=PENDING_APPROVAL if needs_approval else (QUEUED if queued else RUNNING), evidence_dir=str(evidence_dir), target=target,
+                            pace_ms=pace_ms, show_window=show_window)
         if claim.kind in ("replay", "conflict"):
             observability.log("run.idempotency_" + ("hit" if claim.kind == "replay" else "conflict"), run_id=claim.run["id"] if claim.run else None,
                               capability_id=capability_id, requested_by=requested_by)
@@ -330,8 +341,9 @@ def prepare_run(
         try:
             result = _replay_in_browser(
                 artifact, params, target=target, base_url=base_url, username=username, password=password, allowlist=allowlist,
-                headed=headed, slow_mo=slow_mo, evidence_dir=evidence_dir, operator_port=operator_port,
-                enable_operator_console=enable_operator_console, dry_run=dry_run, deadline_s=deadline_s, cancel_event=cancel_event_ or cancel_event,
+                headed=headed or show_window, slow_mo=slow_mo, pace_ms=pace_ms, evidence_dir=evidence_dir, operator_port=operator_port,
+                enable_operator_console=enable_operator_console, dry_run=dry_run, cancel_event=cancel_event_ or cancel_event,
+                deadline_s=(deadline_s + len(artifact.steps) * 2 * pace_ms / 1000 + 5) if (deadline_s and pace_ms) else deadline_s,
                 confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
                 policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
             )
@@ -400,7 +412,7 @@ def _replay_in_browser(
     password: str | None, allowlist: str | None, headed: bool, slow_mo: int, evidence_dir: Path, operator_port: int,
     enable_operator_console: bool, dry_run: bool, deadline_s: float | None, cancel_event: threading.Event | None,
     confirmed_steps: frozenset[str], policy: PolicyConfig,
-    repair_hook: Any = None, artifacts_dir: Path | None = None,
+    repair_hook: Any = None, artifacts_dir: Path | None = None, pace_ms: int = 0,
 ) -> ReplayResult:
     """Launch a browser, log in, deterministically replay one capability, write evidence.
 
@@ -452,7 +464,9 @@ def _replay_in_browser(
             page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
             page.goto(f"{profile['base_url']}{profile['login_path']}")
 
-            surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy)
+            surface = WebSurface(page, base_url=profile["base_url"], screenshot_dir=evidence_dir / "screenshots", evidence_logger=logger, safety_policy=safety_policy,
+                                capture_every_action=policy.evidence.screenshots == "every_action" and (bool(profile.get("sandbox")) or policy.evidence.non_sandbox),
+                                pace_ms=0)  # sign-on runs at full speed; watch pacing starts with the task's own steps
             login_artifact, login = try_login(surface, profile["username"], profile["password"], profile["login_capability"], artifacts_dir)
             if login.status != ReplayStatus.SUCCESS:
                 err = login.error or ReplayError(message=login.business_outcome or login.status.value, code=login.business_outcome)
@@ -464,6 +478,7 @@ def _replay_in_browser(
                 return failed
 
             observability.log("run.signed_in", target=target, login_capability=profile["login_capability"])
+            surface.pace_ms = max(0, int(pace_ms))
 
             if enable_operator_console:
                 session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None)

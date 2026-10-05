@@ -7,9 +7,15 @@ nothing external to start by hand, and no collision with whatever's on 8000/5000
 """
 from __future__ import annotations
 
+import os
 import socket
+import tempfile
 import threading
 import time
+
+# Before anything imports the app: session-scoped fixtures (the in-process API server) start before any per-test fixture and would
+# otherwise run their startup recovery against the developer's real run database (data/runs.db).
+os.environ.setdefault("RUN_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="cua-tests-"), "runs.db"))
 
 import httpx
 import pytest

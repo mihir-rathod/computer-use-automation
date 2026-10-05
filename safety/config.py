@@ -57,8 +57,16 @@ class TracingConfig(BaseModel):
     non_sandbox: bool = Field(default=False, description="Also trace targets that are not marked sandbox. Off by default: a trace contains typed passwords.")
 
 
+class EvidenceConfig(BaseModel):
+    """Whether replay keeps a screenshot after every action ("every_action") or only when an action fails ("errors"). Screenshots cannot be
+    redacted, so every_action applies to sandbox targets only unless non_sandbox is set."""
+    screenshots: Literal["errors", "every_action"] = "errors"
+    non_sandbox: bool = False
+
+
 class PolicyConfig(BaseModel):
     version: Literal[1] = 1
+    evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     approvers: dict[str, Role] = Field(default_factory=dict)
     capabilities: dict[str, CapabilityPolicy] = Field(default_factory=dict)

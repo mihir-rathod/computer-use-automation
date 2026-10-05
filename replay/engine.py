@@ -104,6 +104,7 @@ class ReplayEngine:
         self._commit_step: str | None = None  # irreversible step issued (ambiguous or confirmed)
         self._committed = False
         self._skipped: list[str] = []
+        self._current_capability: str | None = None
         self.evidence_logger = evidence_logger
         self.artifacts_dir = artifacts_dir
         self.reauth_credentials = reauth_credentials
@@ -121,6 +122,14 @@ class ReplayEngine:
         self._recovered = False
 
     def run(self, artifact: Artifact, inputs: dict[str, Any]) -> ReplayResult:
+        # run() recurses for the re-login sub-capability: actions are tagged with the artifact they belong to, and restored afterwards
+        previous, self._current_capability = self._current_capability, artifact.capability_id
+        try:
+            return self._run(artifact, inputs)
+        finally:
+            self._current_capability = previous
+
+    def _run(self, artifact: Artifact, inputs: dict[str, Any]) -> ReplayResult:
         started_at = datetime.now(UTC)
         # run() recurses for the re-login sub-capability; that must spend the outer run's budget,
         # not restart the clock.
@@ -217,11 +226,13 @@ class ReplayEngine:
         for step in artifact.steps:
             if step.when_present and step.when_present not in variables:
                 self._skipped.append(step.step_id)
+                self._log_step(step, "skipped")
                 continue
             if self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE:
                 raise _DryRunStop(step.step_id, completed, dict(outputs))
             extracted = self._run_step_with_recovery(artifact, step, variables, completed, non_idempotent_done)
             completed.append(step.step_id)
+            self._log_step(step, "ok")
             if step.risk_level == StepRiskLevel.IRREVERSIBLE:
                 self._committed = True
                 self._commit_step = step.step_id
@@ -345,6 +356,10 @@ class ReplayEngine:
 
         raise _HardFailure(ReplayError(step_id=step.step_id, message=failure_message, code=code), completed_so_far)
 
+    def _log_step(self, step: Step, status: str) -> None:
+        if self.evidence_logger is not None:
+            self.evidence_logger.log("replay", "step", step_id=step.step_id, status=status, capability_id=self._current_capability)
+
     def _resolve_outcome(self, artifact, outcome, step, variables, completed_so_far, non_idempotent_done, depth, issued) -> str | None:
         kind, _payload = outcome
         if kind == "recoverable" and issued:
@@ -454,7 +469,8 @@ class ReplayEngine:
 
     def _build_action(self, step: Step, variables: dict[str, Any]) -> Action:
         params = substitute(step.params, variables)
-        return Action(kind=step.action, target=step.target, params=params, actor="replay", confirmed=step.step_id in self.confirmed_steps)
+        return Action(kind=step.action, target=step.target, params=params, actor="replay", confirmed=step.step_id in self.confirmed_steps, step_id=step.step_id,
+                      capability_id=self._current_capability)
 
     def _build_business_outputs(self, artifact: Artifact, outcome: str, output_field: str) -> dict[str, Any]:
         outputs: dict[str, Any] = {k: None for k in artifact.output_schema.properties}
