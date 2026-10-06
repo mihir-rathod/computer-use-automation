@@ -1,5 +1,7 @@
 # Computer-Use Automation System
 
+![CI](https://github.com/mihir-rathod/computer-use-automation-system/actions/workflows/ci.yml/badge.svg)
+
 Most legacy and vendor web UIs have no API. They get automated by scripts that break when the page changes, or by an AI agent that drives the UI live on every run: slow, costly, unpredictable.
 
 This project takes a middle path. **An LLM (a large language model; here, Google's Gemini) works out a task once. That run is recorded as a typed, reusable artifact. Every run after that is a deterministic replay with no LLM and no tokens**,
@@ -212,4 +214,4 @@ Measured with `uv run python scripts/benchmark.py all --trials 3` against the bu
 - **No LLM at replay:** 0 LLM calls across 180 replays; a replay takes about 1.8 s.
 - **Discovery:** from one sentence, 3 of 4 read-only tasks were recorded in every attempt (9 of 9), in about 11 s and 13k tokens, 6 steps on average, and each recording was right on 10 other records (90 of 90).
   The 4th (the first row of a table with no labels) is refused with a reason, because the recorder cannot yet describe such a cell so that it carries over to other records.
-- **Next:** a hosted demo of the clinic, a green first run of the CI workflow, and discovering a task on the clinic's React skin.
+- **Next:** a hosted demo of the clinic, and discovering a task on the clinic's React skin.
