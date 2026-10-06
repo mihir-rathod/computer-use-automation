@@ -158,7 +158,7 @@ uv run python cli.py metrics --hours 24
 uv run pytest
 ```
 
-418 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
+419 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
 chat, escalation) and skip without `GEMINI_API_KEY`. The modern-skin browser tests skip until `clinic/modern` is built (`cd clinic/modern && npm install && npm run build`).
 
 ## Results and roadmap
