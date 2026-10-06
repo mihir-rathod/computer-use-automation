@@ -416,7 +416,7 @@ def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
     return {
         "approvers": p.approvers,
         "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
-        "default_approval": p.default_approval, "teaching": p.teaching.model_dump(),
+        "default_approval": p.default_approval, "discovery": p.discovery.model_dump(),
         "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
         "risk_keywords": p.risk_keywords.model_dump(),
         "redaction": {"patterns": sorted(p.redaction.patterns), "field_names": p.redaction.field_names},
@@ -492,11 +492,11 @@ def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
                          "new_locators": [{"strategy": l.strategy.value, "value": l.value} for l in (p.new_target.locators if p.new_target else [])],
                          "candidates": [c.model_dump() for c in p.candidates[:4]], "has_screenshot": bool(p.screenshot), "page_url": p.page_url,
                          "description": p.old_target.semantic_description})
-    teach_commits = [{"id": t["id"], "capability_id": t["capability_id"], "created_by": t["created_by"], "request": json.loads(t["commit_request_json"]) if t["commit_request_json"] else None}
-                     for t in store.teach_active() if t["status"] == "awaiting_commit"]
-    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "teach_commits": teach_commits,
-            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "teach_commits": len(teach_commits),
-                       "total": len(approvals_) + len(reviews) + len(repairs_) + len(teach_commits)}}
+    discovery_commits = [{"id": t["id"], "capability_id": t["capability_id"], "created_by": t["created_by"], "request": json.loads(t["commit_request_json"]) if t["commit_request_json"] else None}
+                     for t in store.discovery_active() if t["status"] == "awaiting_commit"]
+    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "discovery_commits": discovery_commits,
+            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "discovery_commits": len(discovery_commits),
+                       "total": len(approvals_) + len(reviews) + len(repairs_) + len(discovery_commits)}}
 
 
 # ---- repairs ---------------------------------------------------------------------------------------------------------

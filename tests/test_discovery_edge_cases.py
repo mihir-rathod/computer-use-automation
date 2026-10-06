@@ -12,9 +12,9 @@ from agent.loop import DiscoveryLoop, RecordedAction
 from agent.recorder import _parameterize
 from artifacts_lib.schema import ActionType, Locator, LocatorStrategy, Target
 from surface.base import Action, ActionResult, ObservedElement, ObservedState
-from teach.contract import TeachContract
-from teach.derive import derive_success_text
-from teach.prune import prune
+from discover.contract import DiscoveryContract
+from discover.derive import derive_success_text
+from discover.prune import prune
 
 
 # ---- the example value is replaced only where it stands alone -------------------------------------------------------------
@@ -36,7 +36,7 @@ def test_parameterizing_replaces_an_example_only_where_it_stands_alone(text, par
 def contract(**over):
     base = {"task_name": "look_up", "name": "Look up", "description": "Looks a thing up", "target": "clinic", "goal": "Open the thing and read it, then finish.",
             "inputs": [{"name": "appt", "example": "A-20002"}, {"name": "mrn", "example": "LK-100001"}], "outputs": [{"name": "xyz"}], "effect": "read_only"}
-    return TeachContract.model_validate({**base, **over})
+    return DiscoveryContract.model_validate({**base, **over})
 
 
 def test_two_inputs_with_the_same_example_are_refused():

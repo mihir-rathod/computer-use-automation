@@ -32,7 +32,7 @@ function Artifact() {
   const [version, setVersion] = useState<string>(search.get("version") ?? "");
   const vs = useApi<Versions>(id ? `/v1/artifacts/${encodeURIComponent(id)}/versions` : null);
   const cap = useApi<Capability>(id && (version || vs.data?.current) ? `/v1/capabilities/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}` : null);
-  // a draft (taught, never promoted) has no current version: show its latest instead of failing
+  // a draft (discovered, never promoted) has no current version: show its latest instead of failing
   const draftLatest = vs.data && vs.data.current === null ? vs.data.versions[vs.data.versions.length - 1] : "";
   useEffect(() => { if (draftLatest && !version) setVersion(draftLatest); }, [draftLatest, version]);
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");

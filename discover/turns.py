@@ -1,4 +1,4 @@
-"""Turns a teaching session's evidence log into the list of model turns the console shows while it works:
+"""Turns a discovery session's evidence log into the list of model turns the console shows while it works:
 what the page looked like, what the model decided, and what happened."""
 from __future__ import annotations
 

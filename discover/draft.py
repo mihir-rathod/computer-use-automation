@@ -10,7 +10,7 @@ from typing import Any
 from google.genai import types
 from pydantic import ValidationError
 
-from teach.contract import TeachContract, Verify
+from discover.contract import DiscoveryContract, Verify
 
 _STR = types.Schema(type="STRING")
 PROPOSE = types.FunctionDeclaration(
@@ -53,7 +53,7 @@ def draft_contract(model: Any, request: str, target: str, profile: dict[str, Any
     task_name = re.sub(r"[^a-z0-9]+", "_", str(args.get("task_name") or args.get("name") or "").lower()).strip("_")
     task_name = re.sub(r"^[0-9]+", "", task_name)[:40]
     try:
-        contract = TeachContract.model_validate({
+        contract = DiscoveryContract.model_validate({
             "task_name": task_name, "name": args.get("name"), "description": args.get("description") or args.get("name"), "target": target,
             "goal": args.get("goal") or "", "inputs": [{"name": i.get("name"), "example": i.get("example"), "description": i.get("description") or None} for i in args.get("inputs") or []],
             "outputs": [{"name": o.get("name"), "description": o.get("description") or None} for o in args.get("outputs") or []],

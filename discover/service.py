@@ -1,4 +1,4 @@
-"""Teaching sessions: discovery driven from the console instead of the CLI, with the same safety rules.
+"""Discovery sessions: discovery driven from the console instead of the CLI, with the same safety rules.
 
 One session runs at a time (the model's quota is shared and a person is watching it). A session:
   1. signs on with the target's own login capability, so the model never sees a password,
@@ -36,15 +36,15 @@ from safety.config import PolicyConfig, irreversible_step_ids
 from safety.risk import RiskClassifier
 from surface.web import WebSurface
 from artifacts_lib.schema import Signal, SignalType
-from teach.contract import TeachContract
-from teach.derive import derive_success_text
-from teach.prune import prune
+from discover.contract import DiscoveryContract
+from discover.derive import derive_success_text
+from discover.prune import prune
 
 log = logging.getLogger(__name__)
 ACTIVE = ("queued", "running", "awaiting_commit", "verifying")
 
 
-class TeachError(Exception):
+class DiscoveryError(Exception):
     def __init__(self, message: str, status: int = 409):
         super().__init__(message)
         self.status = status
@@ -59,37 +59,37 @@ def model_available() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY"))
 
 
-def teachable_targets(policy: PolicyConfig) -> list[dict[str, Any]]:
-    """Targets a task can be taught on. Sandboxes always; anything else only if the policy allows read-only teaching there."""
+def discoverable_targets(policy: PolicyConfig) -> list[dict[str, Any]]:
+    """Targets a task can be discovered on. Sandboxes always; anything else only if the policy allows read-only discovery there."""
     out = []
     for name, profile in runtime.TARGET_PROFILES.items():
         sandbox = bool(profile.get("sandbox"))
-        if sandbox or policy.teaching.non_sandbox_read_only:
+        if sandbox or policy.discovery.non_sandbox_read_only:
             out.append({"name": name, "app_id": profile["app_id"], "base_url": profile["base_url"], "sandbox": sandbox, "read_only_only": not sandbox})
     return out
 
 
-def check_contract(contract: TeachContract, policy: PolicyConfig, adir: Path) -> dict[str, Any]:
+def check_contract(contract: DiscoveryContract, policy: PolicyConfig, adir: Path) -> dict[str, Any]:
     """Everything that can be refused before a browser is launched. Returns the target profile."""
     profile = runtime.TARGET_PROFILES.get(contract.target)
-    if profile is None or contract.target not in {t["name"] for t in teachable_targets(policy)}:
-        raise TeachError(f"'{contract.target}' is not a target tasks can be taught on", 422)
+    if profile is None or contract.target not in {t["name"] for t in discoverable_targets(policy)}:
+        raise DiscoveryError(f"'{contract.target}' is not a target tasks can be discovered on", 422)
     sandbox = bool(profile.get("sandbox"))
     if not sandbox and contract.effect != "read_only":
-        raise TeachError("on a system that is not a sandbox only read-only tasks can be taught", 422)
+        raise DiscoveryError("on a system that is not a sandbox only read-only tasks can be discovered", 422)
     if contract.effect == "read_only" and contract.commit_approval == "supervisor":
         pass  # harmless: a read-only task is never offered a commit
     if contract.commit_approval == "auto_sandbox" and not sandbox and contract.effect != "read_only":
-        raise TeachError("automatic approval of the commit step is only available on a sandbox", 422)
+        raise DiscoveryError("automatic approval of the commit step is only available on a sandbox", 422)
     cid = contract.capability_id(profile["app_id"])
     if cid == profile["login_capability"]:
-        raise TeachError("the sign-on capability cannot be taught here", 422)
+        raise DiscoveryError("the sign-on capability cannot be discovered here", 422)
     if cid in storage.capability_ids(adir) and storage.current_version(cid, adir) is not None:
-        raise TeachError(f"{cid} already exists and can be run. Pick a different task name; improving an existing task goes through repair", 409)
+        raise DiscoveryError(f"{cid} already exists and can be run. Pick a different task name; improving an existing task goes through repair", 409)
     return profile
 
 
-class TeachService:
+class DiscoveryService:
     def __init__(self, store: RunStore, artifacts_dir: Path, policy: PolicyConfig):
         self.store, self.adir, self.policy = store, artifacts_dir, policy
         self._lock = threading.Lock()
@@ -97,76 +97,76 @@ class TeachService:
 
     # ---- called from the API ---------------------------------------------------------------------------------------
 
-    def start(self, contract: TeachContract, who: str, retry_of: str | None = None) -> dict[str, Any]:
+    def start(self, contract: DiscoveryContract, who: str, retry_of: str | None = None) -> dict[str, Any]:
         if not model_available():
-            raise TeachError("no model key is configured on the server (GEMINI_API_KEY), so nothing can be taught", 503)
+            raise DiscoveryError("no model key is configured on the server (GEMINI_API_KEY), so nothing can be discovered", 503)
         profile = check_contract(contract, self.policy, self.adir)
         with self._lock:
-            active = self.store.teach_active()
+            active = self.store.discovery_active()
             if active:
-                raise TeachError(f"a teaching session is already running ({active[0]['capability_id']}, started by {active[0]['created_by']}). One at a time", 409)
-            row = self.store.teach_create(who, contract.capability_id(profile["app_id"]), contract.target, contract.model_dump_json(), retry_of)
+                raise DiscoveryError(f"a discovery session is already running ({active[0]['capability_id']}, started by {active[0]['created_by']}). One at a time", 409)
+            row = self.store.discovery_create(who, contract.capability_id(profile["app_id"]), contract.target, contract.model_dump_json(), retry_of)
             self._cancel[row["id"]] = threading.Event()
-        observability.log("teach.queued", session_id=row["id"], capability_id=row["capability_id"], by=who)
+        observability.log("discover.queued", session_id=row["id"], capability_id=row["capability_id"], by=who)
         # a daemon thread: a session waiting for an answer from a person must never keep the server from shutting down
-        threading.Thread(target=self._run_safely, args=(row["id"], contract), daemon=True, name="teach-session").start()
+        threading.Thread(target=self._run_safely, args=(row["id"], contract), daemon=True, name="discover-session").start()
         return row
 
     def cancel(self, sid: str) -> None:
-        row = self.store.teach_get(sid)
+        row = self.store.discovery_get(sid)
         if row is None or row["status"] not in ACTIVE:
-            raise TeachError("that session is not running", 409)
+            raise DiscoveryError("that session is not running", 409)
         self._cancel.setdefault(sid, threading.Event()).set()
 
     def decide_commit(self, sid: str, approve: bool, who: str, reason: str) -> dict[str, Any]:
         from runs.store import ApprovalError
         try:
-            return self.store.teach_decide_commit(sid, "approved" if approve else "declined", who, reason)
+            return self.store.discovery_decide_commit(sid, "approved" if approve else "declined", who, reason)
         except ApprovalError as exc:
-            raise TeachError(str(exc), 409) from None
+            raise DiscoveryError(str(exc), 409) from None
 
     def discard(self, sid: str) -> None:
-        row = self.store.teach_get(sid)
+        row = self.store.discovery_get(sid)
         if row is None:
-            raise TeachError("unknown session", 404)
+            raise DiscoveryError("unknown session", 404)
         if row["status"] in ACTIVE:
-            raise TeachError("stop the session first", 409)
+            raise DiscoveryError("stop the session first", 409)
         if row["status"] == "promoted":
-            raise TeachError("this draft was promoted; roll it back from the task's page instead", 409)
+            raise DiscoveryError("this draft was promoted; roll it back from the task's page instead", 409)
         if row["version"]:
             storage.delete_unpublished_version(row["capability_id"], row["version"], self.adir)
-        self.store.teach_update(sid, status="discarded")
+        self.store.discovery_update(sid, status="discarded")
 
     def recover(self) -> None:
         """Sessions a dead process left active can never finish."""
-        for row in self.store.teach_active():
-            self.store.teach_update(sid=row["id"], status="failed", error="the server restarted while this session was running", finished_at=_now())
+        for row in self.store.discovery_active():
+            self.store.discovery_update(sid=row["id"], status="failed", error="the server restarted while this session was running", finished_at=_now())
 
     # ---- the session itself ------------------------------------------------------------------------------------------
 
-    def _run_safely(self, sid: str, contract: TeachContract) -> None:
+    def _run_safely(self, sid: str, contract: DiscoveryContract) -> None:
         try:
             self._run(sid, contract)
         except Exception as exc:  # noqa: BLE001 -- a session must always end in a state a person can read
-            log.exception("teaching session crashed")
-            self.store.teach_update(sid, status="failed", error=_explain(exc), finished_at=_now())
-            observability.log("teach.failed", level=logging.ERROR, session_id=sid)
+            log.exception("discovery session crashed")
+            self.store.discovery_update(sid, status="failed", error=_explain(exc), finished_at=_now())
+            observability.log("discover.failed", level=logging.ERROR, session_id=sid)
 
     def _stopped(self, sid: str) -> bool:
         return self._cancel.get(sid, threading.Event()).is_set()
 
-    def _run(self, sid: str, contract: TeachContract) -> None:
-        row = self.store.teach_get(sid)
+    def _run(self, sid: str, contract: DiscoveryContract) -> None:
+        row = self.store.discovery_get(sid)
         assert row is not None
         profile = runtime.resolve_target(contract.target)
         cid = contract.capability_id(profile["app_id"])
         version = storage.next_version(cid, self.adir)
         spec = contract.to_spec(profile, version)
-        evidence_dir = runtime.EVIDENCE_ROOT / ("teach_" + row["id"].removeprefix("teach_"))
-        self.store.teach_update(sid, status="running", version=version, evidence_dir=str(evidence_dir))
+        evidence_dir = runtime.EVIDENCE_ROOT / ("discover_" + row["id"].removeprefix("disc_"))
+        self.store.discovery_update(sid, status="running", version=version, evidence_dir=str(evidence_dir))
         params = contract.parameters()
         logger = EvidenceLogger(evidence_dir, redactor=Redactor.from_config(self.policy.redaction).with_secrets_from({**params, "password": profile["password"]}))
-        logger.log("system", "run_start", kind="teaching", capability_id=cid, goal=contract.goal, target=contract.target, by=row["created_by"])
+        logger.log("system", "run_start", kind="discovery", capability_id=cid, goal=contract.goal, target=contract.target, by=row["created_by"])
         safety_policy = runtime.build_safety_policy(profile["base_url"], profile["allowlist"], self.policy)
         gate = self._gate(sid, contract, profile, row["created_by"])
         model = get_model()
@@ -179,9 +179,9 @@ class TeachService:
             _, login = runtime.try_login(surface, profile["username"], profile["password"], profile["login_capability"], self.adir)
             if login.status != ReplayStatus.SUCCESS:
                 outcome["stop"] = "failed"
-                outcome["error"] = f"signing on to {contract.target} failed ({(login.error.message if login.error else login.status.value)}), so nothing could be taught"
+                outcome["error"] = f"signing on to {contract.target} failed ({(login.error.message if login.error else login.status.value)}), so nothing could be discovered"
                 return
-            loop = DiscoveryLoop(surface, model, evidence_logger=logger, max_steps=self.policy.teaching.max_steps, timeout_seconds=self.policy.teaching.timeout_s,
+            loop = DiscoveryLoop(surface, model, evidence_logger=logger, max_steps=self.policy.discovery.max_steps, timeout_seconds=self.policy.discovery.timeout_s,
                                  commit_gate=gate, capability_id=cid, should_stop=lambda: self._stopped(sid), allow_navigate=False)
             derived = {*spec.success_output_defaults, *(r.output_field for r in spec.error_handling.business_outcomes)}
             result = loop.run(goal=spec.goal, parameters=params, start_path=spec.start_path, output_names=[k for k in spec.output_schema.properties if k not in derived])
@@ -215,7 +215,7 @@ class TeachService:
             if verify_inputs is None:
                 outcome["verify"] = {"ran": False}
                 return
-            self.store.teach_update(sid, status="verifying")
+            self.store.discovery_update(sid, status="verifying")
             logger.log("system", "verification_start", inputs=verify_inputs)
             engine = ReplayEngine(surface, evidence_logger=logger, reauth_credentials={"username": profile["username"], "password": profile["password"]},
                                   artifacts_dir=self.adir, confirmed_steps=irreversible_step_ids(artifact), deadline_s=90)
@@ -227,7 +227,7 @@ class TeachService:
             logger.close()
         self._finish(sid, contract, cid, version, evidence_dir, outcome, row["created_by"])
 
-    def _finish(self, sid: str, contract: TeachContract, cid: str, version: str, evidence_dir: Path, outcome: dict[str, Any], who: str) -> None:
+    def _finish(self, sid: str, contract: DiscoveryContract, cid: str, version: str, evidence_dir: Path, outcome: dict[str, Any], who: str) -> None:
         result = outcome.get("discovery")
         steps = len(outcome["artifact"].steps) if "artifact" in outcome else (len(result.transcript) if result else None)
         common: dict[str, Any] = {"finished_at": _now(), "steps": steps, "stop_reason": result.stop_reason if result else None,
@@ -245,14 +245,14 @@ class TeachService:
                 status = "failed"
             else:
                 status = "stuck"
-            self.store.teach_update(sid, status=status, error=outcome.get("error") or _stuck_message(result), **common)
-            observability.log("teach.ended", session_id=sid, capability_id=cid, status=status)
+            self.store.discovery_update(sid, status=status, error=outcome.get("error") or _stuck_message(result), **common)
+            observability.log("discover.ended", session_id=sid, capability_id=cid, status=status)
             return
         artifact = outcome["artifact"]
         verify = outcome.get("verify") or {"ran": False}
         findings = lint_artifact(artifact)
         lint = [{"level": f.level, "code": f.code, "message": f.message, "step_id": f.step_id} for f in findings]
-        note = f"Taught from the console by {who} on {datetime.now(UTC).date()} from a {contract.target} session. "
+        note = f"Discovered from the console by {who} on {datetime.now(UTC).date()} from a {contract.target} session. "
         note += (("Replayed once with the example values, without the model. " if contract.verify and contract.verify.same_as_example else "Verified once with a second set of inputs. ") if verify.get("passed") else
                  "Not verified. " if not verify.get("ran") else "Verification FAILED; do not promote without reading why. ")
         if outcome.get("dropped"):
@@ -260,7 +260,7 @@ class TeachService:
         if outcome.get("success_decided"):
             note += f"Success is recognised by the text “{outcome['success_text']}”, which the system chose from the page the answer was read from. "
         artifact.provenance.note = note + " Not yet human-reviewed."
-        storage.save_artifact(artifact, self.adir, make_current=False, by=who, reason=f"taught in session {sid}")
+        storage.save_artifact(artifact, self.adir, make_current=False, by=who, reason=f"discovered in session {sid}")
         (evidence_dir / "artifact.json").write_text(artifact.model_dump_json(indent=2))
         unused = sorted({re.search(r"input '([^']+)'", f.message).group(1) for f in findings if f.code == "unused-input" and re.search(r"input '([^']+)'", f.message)})
         if unused:
@@ -276,38 +276,38 @@ class TeachService:
             error = "the recorded task failed its own check" if verify.get("ran") and not verify.get("passed") else "the recorded task has errors that must be fixed before it can run"
         else:
             status, error = "ready", None
-        self.store.teach_update(sid, status=status, error=error, verify_json=json.dumps(verify), lint_json=json.dumps(lint), **common)
-        observability.log("teach.ended", session_id=sid, capability_id=cid, status=status)
+        self.store.discovery_update(sid, status=status, error=error, verify_json=json.dumps(verify), lint_json=json.dumps(lint), **common)
+        observability.log("discover.ended", session_id=sid, capability_id=cid, status=status)
 
     # ---- the commit gate -----------------------------------------------------------------------------------------------
 
-    def _gate(self, sid: str, contract: TeachContract, profile: dict[str, Any], who: str) -> CommitGate:
+    def _gate(self, sid: str, contract: DiscoveryContract, profile: dict[str, Any], who: str) -> CommitGate:
         if contract.effect == "read_only":
             def refuse(req: CommitRequest) -> CommitDecision:
                 return CommitDecision(False, mode="supervised", note="this task was declared read-only")
             return refuse
         if contract.commit_approval == "auto_sandbox":
             return auto_sandbox_gate(bool(profile.get("sandbox")))
-        wait_s = self.policy.teaching.commit_wait_s
+        wait_s = self.policy.discovery.commit_wait_s
 
         def ask(req: CommitRequest) -> CommitDecision:
-            self.store.teach_update(sid, status="awaiting_commit", commit_decision=None, commit_decided_by=None, commit_reason=None,
+            self.store.discovery_update(sid, status="awaiting_commit", commit_decision=None, commit_decided_by=None, commit_reason=None,
                                     commit_request_json=json.dumps({"description": req.description, "url": req.url, "page_title": req.page_title, "goal": req.goal, "at": _now()}))
-            observability.log("teach.awaiting_commit", session_id=sid)
+            observability.log("discover.awaiting_commit", session_id=sid)
             deadline = time.monotonic() + wait_s
             while time.monotonic() < deadline and not self._stopped(sid):
-                row = self.store.teach_get(sid) or {}
+                row = self.store.discovery_get(sid) or {}
                 if row.get("commit_decision"):
                     approved = row["commit_decision"] == "approved"
-                    self.store.teach_update(sid, status="running", commit_request_json=None)
+                    self.store.discovery_update(sid, status="running", commit_request_json=None)
                     return CommitDecision(approved, approver=row.get("commit_decided_by"), mode="supervised", note=row.get("commit_reason"))
                 time.sleep(0.4)
-            self.store.teach_update(sid, status="running", commit_request_json=None)
+            self.store.discovery_update(sid, status="running", commit_request_json=None)
             return CommitDecision(False, mode="supervised", note="cancelled" if self._stopped(sid) else f"nobody answered within {wait_s // 60} minutes")
         return ask
 
 
-def _judge(contract: TeachContract, result: Any) -> dict[str, Any]:
+def _judge(contract: DiscoveryContract, result: Any) -> dict[str, Any]:
     v: dict[str, Any] = {"ran": True, "status": result.status.value, "business_outcome": result.business_outcome, "outputs": result.outputs,
                          "error": result.error.message if result.error else None, "warnings": [], "inputs": contract.verify_inputs()}
     expected = contract.verify.expect_outcome if contract.verify else None

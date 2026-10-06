@@ -64,19 +64,19 @@ class EvidenceConfig(BaseModel):
     non_sandbox: bool = False
 
 
-class TeachingConfig(BaseModel):
-    """Teaching a new task (discovery from the console). A model drives a real browser and sees what the page shows, so it is limited to sandbox
+class DiscoveryConfig(BaseModel):
+    """Discovery a new task (discovery from the console). A model drives a real browser and sees what the page shows, so it is limited to sandbox
     targets unless a policy owner opts in, and then only for tasks that read."""
     non_sandbox_read_only: bool = False
     max_steps: int = Field(default=25, ge=3, le=60)
     timeout_s: int = Field(default=300, ge=30, le=1800)
-    commit_wait_s: int = Field(default=900, ge=30, le=7200, description="How long a teaching session waits for a supervisor to approve its commit step.")
+    commit_wait_s: int = Field(default=900, ge=30, le=7200, description="How long a discovery session waits for a supervisor to approve its commit step.")
 
 
 class PolicyConfig(BaseModel):
     version: Literal[1] = 1
-    default_approval: ApprovalTier = Field(default="supervisor", description="For a capability not listed below that has an irreversible step: who must approve it. A newly taught task lands here.")
-    teaching: TeachingConfig = Field(default_factory=TeachingConfig)
+    default_approval: ApprovalTier = Field(default="supervisor", description="For a capability not listed below that has an irreversible step: who must approve it. A newly discovered task lands here.")
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     approvers: dict[str, Role] = Field(default_factory=dict)

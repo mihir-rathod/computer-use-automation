@@ -1,4 +1,4 @@
-"""What a person fills in to teach a new task, and how it becomes the capability contract discovery works from.
+"""What a person fills in to discover a new task, and how it becomes the capability contract discovery works from.
 
 The model is only ever told *how to drive the screens toward a goal*; everything that makes a capability safe and reviewable (typed inputs and
 outputs, the success signal, what counts as a normal answer, its risk) is decided here by a human, exactly as it is for the capabilities that
@@ -32,7 +32,7 @@ class InputField(BaseModel):
     name: str
     kind: Literal["text", "number"] = "text"
     required: bool = True
-    example: str = Field(min_length=2, max_length=200, description="The value used while teaching. It is replaced by whatever the caller supplies at run time.")
+    example: str = Field(min_length=2, max_length=200, description="The value used while discovery. It is replaced by whatever the caller supplies at run time.")
     description: str | None = Field(default=None, max_length=200)
     pattern: str | None = Field(default=None, max_length=200, description="A regular expression the value must match, to catch typos before a run starts.")
     choices: list[str] | None = Field(default=None, description="If given, the value must be one of these.")
@@ -92,12 +92,12 @@ class Outcome(BaseModel):
 
 
 class Verify(BaseModel):
-    inputs: dict[str, str] = Field(default_factory=dict, description="A second, different set of inputs. After teaching, the recorded task is replayed once with these to prove it works for more than the example.")
+    inputs: dict[str, str] = Field(default_factory=dict, description="A second, different set of inputs. After discovery, the recorded task is replayed once with these to prove it works for more than the example.")
     expect_outcome: str | None = Field(default=None, description="If the second set should end in a normal answer (for example not_found) rather than success, name it.")
     same_as_example: bool = Field(default=False, description="Replay once with the example values themselves. Proves the recording replays on its own, without a model; read-only tasks only, since a task that commits would commit twice.")
 
 
-class TeachContract(BaseModel):
+class DiscoveryContract(BaseModel):
     task_name: str = Field(description="Part of the capability id, for example 'appointment_details' makes clinic.appointment_details.")
     name: str = Field(min_length=3, max_length=80)
     description: str = Field(min_length=5, max_length=300)
@@ -136,7 +136,7 @@ class TeachContract(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _consistent(self) -> TeachContract:
+    def _consistent(self) -> DiscoveryContract:
         names = [i.name for i in self.inputs]
         if len(set(names)) != len(names):
             raise ValueError("two inputs have the same name")
@@ -176,7 +176,7 @@ class TeachContract(BaseModel):
             goal += ("\n\nThis task only READS. Do not press anything that saves, submits, confirms, cancels, updates, sends or otherwise changes data. "
                      "Read the values asked for, then finish.")
         if self.hint:
-            goal += f"\n\nHint from the person teaching you (the previous attempt got stuck): {self.hint.strip()}"
+            goal += f"\n\nHint from the person discovery you (the previous attempt got stuck): {self.hint.strip()}"
         return goal
 
     def verify_inputs(self) -> dict[str, Any] | None:

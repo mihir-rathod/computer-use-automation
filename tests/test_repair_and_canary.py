@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-import canary
+from repair import canary
 import runtime
 from artifacts_lib import storage
 from artifacts_lib.diff import diff_artifacts

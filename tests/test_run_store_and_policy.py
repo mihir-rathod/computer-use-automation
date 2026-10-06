@@ -362,3 +362,18 @@ def test_secret_parameter_values_are_scrubbed_from_free_text():
     r = Redactor.from_config(PolicyConfig.load().redaction).with_secrets_from({"password": "hunter2-longer", "username": "frontdesk"})
     out = r.scrub({"reasoning": "I typed hunter2-longer into the password box for frontdesk"})
     assert "hunter2-longer" not in json.dumps(out) and "frontdesk" in json.dumps(out)
+
+
+def test_a_database_from_before_the_rename_keeps_its_discovery_sessions(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE teach_sessions (id TEXT PRIMARY KEY, created_by TEXT NOT NULL, created_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, capability_id TEXT NOT NULL,"
+               " version TEXT, target TEXT NOT NULL, contract_json TEXT NOT NULL, evidence_dir TEXT, stop_reason TEXT, reasoning TEXT, steps INTEGER, error TEXT, verify_json TEXT,"
+               " lint_json TEXT, commit_request_json TEXT, commit_decision TEXT, commit_decided_by TEXT, commit_reason TEXT, retry_of TEXT)")
+    db.execute("INSERT INTO teach_sessions(id, created_by, created_at, status, capability_id, target, contract_json) VALUES('teach_old_1','dana','2026-10-05T00:00:00','ready','clinic.x_y','clinic','{}')")
+    db.commit()
+    db.close()
+    store = RunStore(path)
+    assert store.discovery_get("teach_old_1")["capability_id"] == "clinic.x_y"
+    assert store.discovery_create("dana", "clinic.z_z", "clinic", "{}")["id"].startswith("disc_")

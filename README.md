@@ -5,7 +5,7 @@ replay**: no model, no tokens, with safety gating, human approval and a full evi
 
 > **Status: in active development on `dev`.** Discovery, replay, approvals, repair proposals, an authenticated async API, an MCP server and a web console work end to
 > end against a purpose-built clinic app that has fault injection, UI drift and an audit log. Eight clinic tasks were discovered by the model; more can be added from
-> the console. A measured benchmark, CI and the hosted demo are still to come. [WRITEUP.md](WRITEUP.md) has the design, the incidents and an honest list of what is not done.
+> the console. A measured benchmark, CI and the hosted demo are still to come. See [Results and roadmap](#results-and-roadmap).
 
 ## What you can do
 
@@ -52,8 +52,7 @@ What you see follows your key's role. The role decides visibility only; the API 
 | supervisor | The above, plus **Discover** |
 | admin | The above, plus **Manage**: Overview (metrics), Artifacts, Policy, API keys |
 
-Keyboard: `g` then a letter to jump between pages, `/` to search, `?` for help. Light and dark themes follow your system. Page-by-page details are in
-[docs/reference.md](docs/reference.md#the-console-pages). While developing the UI, `cd ui && npm run dev` serves it on port 3000 and proxies `/v1` to the API.
+Keyboard: `g` then a letter to jump between pages, `/` to search, `?` for help. Light and dark themes follow your system. While developing the UI, `cd ui && npm run dev` serves it on port 3000 and proxies `/v1` to the API.
 
 **Watch it run.** On a task form, choose *Slow* or *Step by step*. The element about to be touched is outlined in amber and the run page follows along. It never changes what the
 run does. If the server runs on the machine you are sitting at, start it with `CUA_ALLOW_WINDOW=1` to also open a real browser window.
@@ -72,7 +71,43 @@ Supervisors: **Discover → Discover a task**.
 
 If the model reaches the one irreversible step it stops and asks you; a task declared read-only can never commit. If it gets stuck, nothing is saved and *Try again with a hint*
 reopens the draft. *More details* lets you set everything by hand. Passwords, secrets and tokens are refused as inputs. One session runs at a time, and it needs
-`GEMINI_API_KEY` (running tasks does not). Limits are under `teaching:` in `safety/policy.yaml`.
+`GEMINI_API_KEY` (running tasks does not). Limits are under `discovery:` in `safety/policy.yaml`.
+
+## Using it without the console
+
+**HTTP API.** `/v1` is authenticated and asynchronous (interactive docs at `/docs`). A key's name is recorded as the requester or approver and its role decides what it may do.
+
+```bash
+uv run python cli.py keys create --name alex --role operator          # shown once; only a hash is stored
+curl -s -X POST localhost:8020/v1/runs -H "Authorization: Bearer $ALEX" -H "Idempotency-Key: refund-INV-30001-1" -H 'content-type: application/json' \
+  -d '{"capability_id":"clinic.issue_refund","target":"clinic","params":{"invoice":"INV-30001","amount":"25.00","reason":"duplicate_payment"}}'
+curl -s -X POST localhost:8020/v1/runs/RUN_ID/approve -H "Authorization: Bearer $DANA" -H 'content-type: application/json' -d '{"reason":"invoice checked"}'   # a different key
+```
+
+A run returns `202` and an id at once; follow it with `GET /v1/runs/{id}` or the `/events` stream. The caller never supplies a URL or credentials; the target profile decides.
+
+**AI assistants (MCP).** `mcp_server.py` exposes every recorded task as an MCP tool, as a thin client of `/v1` under the assistant's own key, so the key's role is its ceiling. There is no
+tool to approve, and a task that commits requires an idempotency key. For Claude Desktop (the API and the clinic must be running):
+
+```json
+{"mcpServers": {"capability-platform": {"command": "uv", "args": ["--directory", "/absolute/path/to/this/repo", "run", "python", "mcp_server.py"],
+  "env": {"CUA_API_URL": "http://127.0.0.1:8020", "CUA_API_KEY": "cua_..."}}}}
+```
+
+**Metrics and traces.** `cli.py metrics --hours 24` (or `GET /v1/metrics`, and `/v1/metrics.prom` for Prometheus). The server logs one JSON line per event, each with its `run_id`. A failed run against a
+sandbox keeps a Playwright trace: `uv run playwright show-trace evidence/<run>/trace.zip`.
+
+**Approvals, repairs and canaries from the CLI.**
+
+```bash
+uv run python cli.py runs pending
+uv run python cli.py approve RUN_ID --by dana.okafor --reason "checked the invoice"
+uv run python cli.py replay --target clinic --capability clinic.issue_refund --resume RUN_ID
+uv run python cli.py repair list --status pending                  # then: repair show / repair approve REPAIR_ID
+uv run python cli.py canary run --target clinic                    # known-good read-only replays, to catch drift early
+```
+
+Approver names come from the roster in `safety/policy.yaml`. `docker compose up --build` runs everything in one container; set `CLINIC_TEST_TOKEN` on anything that is not purely local.
 
 ## How it works
 
@@ -105,18 +140,17 @@ uv run python cli.py artifact list                                              
 uv run python cli.py metrics --hours 24
 ```
 
-Approvals, repairs, canaries, keys and the rest are in [docs/reference.md](docs/reference.md).
 
 ## Where things are
 
 | Area | Paths |
 |---|---|
-| **Discovery and replay** | `agent/` (discovery loop, recorder, catalog) · `replay/` (engine) · `surface/` (Playwright, browser pool) · `artifacts_lib/` (schema, versions, lint, diff) · `teach/` (discovery from the console) |
-| **Safety and runs** | `safety/` (allowlist, risk, `policy.yaml`) · `runs/` (SQLite store, async executor) · `repair/` · `escalation/` · `evidence_lib/` |
+| **Discovery and replay** | `agent/` (discovery loop, recorder, catalog) · `replay/` (engine) · `surface/` (Playwright, browser pool) · `artifacts_lib/` (schema, versions, lint, diff) · `discover/` (discovery from the console) |
+| **Safety and runs** | `safety/` (allowlist, risk, `policy.yaml`) · `runs/` (SQLite store, async executor) · `repair/` (drift repair, canaries) · `escalation/` · `evidence_lib/` |
 | **Interfaces** | `api/` (the `/v1` API) · `ui/` (web console, Next.js) · `mcp_server.py` · `cli.py` · `observability.py` |
 | **Practice systems** | `clinic/` (the target we ship: legacy and React skins, JSON API, audit log, chaos, drift). The original MockBank sample, and the older chat and dashboard, live on the `mockbank` branch; the engine tests still use a small copy of the MockBank site under `tests/support/`. |
 | **Data** | `artifacts/` (one folder per task, every version) · `data/` (run database) · `evidence/` (screenshots, logs, traces) |
-| **Everything else** | `tests/` · `scripts/` · `docs/reference.md` · `WRITEUP.md` |
+| **Everything else** | `tests/` · `scripts/` |
 
 ## Tests
 
@@ -124,10 +158,13 @@ Approvals, repairs, canaries, keys and the rest are in [docs/reference.md](docs/
 uv run pytest
 ```
 
-430 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
+418 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
 chat, escalation) and skip without `GEMINI_API_KEY`. The modern-skin browser tests skip until `clinic/modern` is built (`cd clinic/modern && npm install && npm run build`).
 
-## Not done yet
+## Results and roadmap
 
-The short version: a measured benchmark and CI; the hosted demo; taking over a paused run; approver identity on the CLI is asserted, not authenticated; repair proposals are one
-step at a time. [WRITEUP.md](WRITEUP.md) has the full list, the design decisions and the incidents.
+- **Deterministic replay:** a retried commit posts exactly once, verified against the target's own audit log with the target's duplicate guard switched off.
+- **Drift recovery:** replays recovered 7 of 7 tasks at each of three UI-drift levels (changed ids and classes, then labels, then form field names) through human-approved repair proposals
+  (`scripts/drift_report.py`).
+- **Discovery:** from one sentence, the model drafts a task, works it out in about 20 seconds on a practice system, and the recording gave the right answers for 14 other records in each of 3 live runs.
+- **Roadmap:** a benchmark of success and recovery rates, CI, a hosted demo, taking over a paused run, and discovering a task on the clinic's React skin.

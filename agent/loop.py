@@ -93,7 +93,7 @@ class DiscoveryLoop:
         # Asked, instead of failing the step, when the safety policy blocks an irreversible action. No gate
         # means the old behaviour: the block is reported back to the model and discovery cannot commit.
         self.commit_gate = commit_gate
-        self.should_stop = should_stop  # polled each turn so a person can cancel a teaching session
+        self.should_stop = should_stop  # polled each turn so a person can cancel a discovery session
         self.tools = ALL_TOOLS if allow_navigate else CLICK_ONLY_TOOLS
         self.capability_id = capability_id
         self.gemini_client = gemini_client

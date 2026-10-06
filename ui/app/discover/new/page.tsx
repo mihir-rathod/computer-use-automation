@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { useApi, useAuth, useToast } from "@/lib/hooks";
-import { atLeast, type TeachContract, type TeachEffect, type TeachOptions, type TeachSession } from "@/lib/types";
+import { atLeast, type DiscoveryContract, type DiscoverEffect, type DiscoverOptions, type DiscoverSession } from "@/lib/types";
 import { Empty, ErrorState, Field, PageHead, Skeleton } from "@/components/ui";
 import { IconBolt, IconSpinner, IconX } from "@/components/icons";
 
@@ -15,7 +15,7 @@ type Check = "same" | "second" | "none";
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^[0-9]+/, "").slice(0, 40);
 const blankInput = (): InputRow => ({ name: "", kind: "text", required: true, example: "", pattern: "", choices: "", description: "" });
-const EFFECTS: { key: TeachEffect; title: string; text: string }[] = [
+const EFFECTS: { key: DiscoverEffect; title: string; text: string }[] = [
   { key: "read_only", title: "It only reads", text: "Looks something up and gives it back. The model is not allowed to press anything that changes data." },
   { key: "changes_data", title: "It changes data", text: "Changes something that can be corrected afterwards." },
   { key: "irreversible", title: "It commits something", text: "Cannot be undone from here, such as a refund or a submitted claim. Every run will need a supervisor's approval." },
@@ -26,8 +26,8 @@ function NewTask() {
   const toast = useToast();
   const { me } = useAuth();
   const retry = useSearchParams().get("retry");
-  const opts = useApi<TeachOptions>("/v1/teach/options");
-  const prev = useApi<TeachSession>(retry ? `/v1/teach/${retry}` : null);
+  const opts = useApi<DiscoverOptions>("/v1/discover/options");
+  const prev = useApi<DiscoverSession>(retry ? `/v1/discover/${retry}` : null);
   const [stage, setStage] = useState<"describe" | "review">(retry ? "review" : "describe");
   const [request, setRequest] = useState(""); const [drafting, setDrafting] = useState(false); const [question, setQuestion] = useState<string | null>(null);
   const [target, setTarget] = useState("");
@@ -37,13 +37,13 @@ function NewTask() {
   const [outputs, setOutputs] = useState<OutRow[]>([{ name: "", description: "" }]);
   const [successText, setSuccessText] = useState(""); const [successStatus, setSuccessStatus] = useState("done");
   const [outcomes, setOutcomes] = useState<OutcomeRow[]>([]);
-  const [effect, setEffect] = useState<TeachEffect>("read_only"); const [commitApproval, setCommitApproval] = useState<"auto_sandbox" | "supervisor">("supervisor");
+  const [effect, setEffect] = useState<DiscoverEffect>("read_only"); const [commitApproval, setCommitApproval] = useState<"auto_sandbox" | "supervisor">("supervisor");
   const [check, setCheck] = useState<Check>("same"); const [verifyInputs, setVerifyInputs] = useState<Record<string, string>>({}); const [expectOutcome, setExpectOutcome] = useState("");
   const [hint, setHint] = useState(""); const [retryText, setRetryText] = useState(""); const [timeoutText, setTimeoutText] = useState("");
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  function fill(c: TeachContract) {
+  function fill(c: DiscoveryContract) {
     setTarget(c.target); setName(c.name); setTaskName(c.task_name); setTaskTouched(true); setDescription(c.description); setGoal(c.goal); setStartPath(c.start_path ?? "");
     setInputs(c.inputs.length ? c.inputs.map((i) => ({ name: i.name, kind: i.kind, required: i.required, example: i.example, pattern: i.pattern ?? "", choices: (i.choices ?? []).join(", "), description: i.description ?? "" })) : [blankInput()]);
     setOutputs(c.outputs.length ? c.outputs.map((o) => ({ name: o.name, description: o.description ?? "" })) : [{ name: "", description: "" }]);
@@ -63,7 +63,7 @@ function NewTask() {
   useEffect(() => { if (readOnlyOnly && effect !== "read_only") setEffect("read_only"); }, [readOnlyOnly, effect]);
   useEffect(() => { if (effect !== "read_only" && check === "same") setCheck("none"); }, [effect, check]);
 
-  const contract = useMemo<TeachContract>(() => ({
+  const contract = useMemo<DiscoveryContract>(() => ({
     task_name: taskName.trim(), name: name.trim(), description: description.trim() || name.trim(), target, goal: goal.trim(), start_path: startPath.trim() || null,
     inputs: inputs.filter((i) => i.name.trim()).map((i) => ({ name: i.name.trim(), kind: i.kind, required: i.required, example: i.example.trim(), description: i.description.trim() || null, pattern: i.pattern.trim() || null, choices: i.choices.trim() ? i.choices.split(",").map((c) => c.trim()).filter(Boolean) : null })),
     outputs: outputs.filter((o) => o.name.trim()).map((o) => ({ name: o.name.trim(), description: o.description.trim() || null })),
@@ -81,7 +81,7 @@ function NewTask() {
   async function draftIt(e: React.FormEvent) {
     e.preventDefault(); setError(null); setQuestion(null); setDrafting(true);
     try {
-      const r = await api<{ contract?: TeachContract; question?: string }>("/v1/teach/draft", { method: "POST", json: { target, request } });
+      const r = await api<{ contract?: DiscoveryContract; question?: string }>("/v1/discover/draft", { method: "POST", json: { target, request } });
       if (r.question) setQuestion(r.question);
       else if (r.contract) { fill(r.contract); setStage("review"); }
     } catch (err) { setError(err instanceof ApiError ? err.message : "Could not draft it"); }
@@ -90,8 +90,8 @@ function NewTask() {
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true);
     try {
-      const s = await api<TeachSession>("/v1/teach", { method: "POST", json: { contract, retry_of: retry } });
-      router.push(`/teach/session/?id=${s.id}`);
+      const s = await api<DiscoverSession>("/v1/discover", { method: "POST", json: { contract, retry_of: retry } });
+      router.push(`/discover/session/?id=${s.id}`);
     } catch (err) { const m = err instanceof ApiError ? err.message : "Could not start"; setError(m); toast(m, true); window.scrollTo({ top: 0, behavior: "smooth" }); }
     finally { setBusy(false); }
   }
@@ -99,7 +99,7 @@ function NewTask() {
 
   return (
     <div className="page">
-      <PageHead title={retry ? "Discover it again" : "Discover a new task"} crumb={<Link href="/teach/">← Discovery</Link>}
+      <PageHead title={retry ? "Discover it again" : "Discover a new task"} crumb={<Link href="/discover/">← Discovery</Link>}
         sub="Say what you want done in your own words. The model works out the clicks once on a practice system, and every run after that replays them with no model." />
       {error && <div className="banner bad" role="alert"><div className="grow"><strong>That did not work</strong><span>{error}</span></div></div>}
       {!o.model_available && <div className="banner warn" role="status"><div className="grow"><strong>No model is configured</strong><span>Set GEMINI_API_KEY on the server first.</span></div></div>}

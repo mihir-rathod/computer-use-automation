@@ -14,13 +14,13 @@ approvers:
   sam.reyes: operator
   dana.okafor: supervisor
 
-# A capability not listed under `capabilities` that has an irreversible step needs this approval. A task taught from the console lands here until you
+# A capability not listed under `capabilities` that has an irreversible step needs this approval. A task discovered from the console lands here until you
 # give it an entry of its own (with amount caps, a different tier, ...).
 default_approval: supervisor
 
-# Teaching a new task from the console. A model drives a real browser and sees whatever the page shows, so by default it is limited to sandbox
-# targets. non_sandbox_read_only lets it teach read-only tasks on a real system; turn it on only after deciding what the model may see.
-teaching:
+# Discovering a new task from the console. A model drives a real browser and sees whatever the page shows, so by default it is limited to sandbox
+# targets. non_sandbox_read_only lets it discover read-only tasks on a real system; turn it on only after deciding what the model may see.
+discovery:
   non_sandbox_read_only: false
   max_steps: 25
   timeout_s: 300

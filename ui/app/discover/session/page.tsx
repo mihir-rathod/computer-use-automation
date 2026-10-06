@@ -4,16 +4,16 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ApiError, api } from "@/lib/api";
 import { useApi, useAuth, useToast } from "@/lib/hooks";
-import { atLeast, type TeachSession, type TeachTurn } from "@/lib/types";
+import { atLeast, type DiscoverSession, type DiscoverTurn } from "@/lib/types";
 import { ago, label } from "@/lib/format";
 import { Empty, ErrorState, PageHead, Skeleton } from "@/components/ui";
 import { Alert, Lightbox, ReasonDialog, Shot } from "@/components/Panels";
-import { TeachPill } from "@/components/Teach";
+import { DiscoverPill } from "@/components/Discover";
 import { IconCheck, IconClock, IconSpinner, IconX } from "@/components/icons";
 
 const ACTIVE = ["queued", "running", "awaiting_commit", "verifying"];
 
-function Turns({ turns, active, onShot, id }: { turns: TeachTurn[]; active: boolean; onShot: (u: string, a: string) => void; id: string }) {
+function Turns({ turns, active, onShot, id }: { turns: DiscoverTurn[]; active: boolean; onShot: (u: string, a: string) => void; id: string }) {
   if (turns.length === 0) return <div className="card-body muted small">{active ? "Signing on and opening the first page…" : "The model did not get to take a step."}</div>;
   return (
     <ol className="timeline" aria-label="What the model did">
@@ -29,7 +29,7 @@ function Turns({ turns, active, onShot, id }: { turns: TeachTurn[]; active: bool
               {t.error && <div className="small" style={{ color: "var(--bad)" }}>{t.error}</div>}
               {t.commit && <div className="small">{t.commit.approved ? `Final step approved by ${t.commit.by ?? "the system"}.` : "Final step declined."}</div>}
             </div>
-            {t.screenshot ? <Shot path={`/v1/teach/${id}/screenshots/${t.screenshot}`} alt={`Page before step ${t.n}`} onOpen={onShot} /> : <span />}
+            {t.screenshot ? <Shot path={`/v1/discover/${id}/screenshots/${t.screenshot}`} alt={`Page before step ${t.n}`} onOpen={onShot} /> : <span />}
           </li>);
       })}
     </ol>
@@ -41,7 +41,7 @@ function Session() {
   const { me } = useAuth();
   const toast = useToast();
   const [every, setEvery] = useState(1500);
-  const s = useApi<TeachSession>(id ? `/v1/teach/${id}` : null, { every });
+  const s = useApi<DiscoverSession>(id ? `/v1/discover/${id}` : null, { every });
   const [shot, setShot] = useState<{ url: string; alt: string } | null>(null);
   const [dlg, setDlg] = useState<null | "approve" | "decline" | "promote" | "discard">(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +49,7 @@ function Session() {
   const settled = !!d && !ACTIVE.includes(d.status);
   useEffect(() => { if (settled) setEvery(0); }, [settled]);  // stops polling once nothing more can change
   if (!atLeast(me?.role, "supervisor")) return <div className="page"><Empty title="Discovery needs a supervisor" /></div>;
-  if (!id) return <div className="page"><Empty title="No session chosen">Pick one from <Link href="/teach/">Discovery</Link>.</Empty></div>;
+  if (!id) return <div className="page"><Empty title="No session chosen">Pick one from <Link href="/discover/">Discovery</Link>.</Empty></div>;
   if (s.error && !d) return <div className="page"><ErrorState error={s.error} retry={s.reload} /></div>;
   if (!d) return <div className="page"><Skeleton lines={6} /></div>;
 
@@ -59,7 +59,7 @@ function Session() {
   const mine = d.created_by === me?.name;
   async function post(path: string, json: unknown, done: string) {
     setBusy(true);
-    try { await api(`/v1/teach/${id}${path}`, { method: "POST", json }); toast(done); setEvery(1500); await s.reload(); }
+    try { await api(`/v1/discover/${id}${path}`, { method: "POST", json }); toast(done); setEvery(1500); await s.reload(); }
     catch (e) { toast(e instanceof ApiError ? e.message : "Failed", true); throw e; } finally { setBusy(false); }
   }
   const v = d.verify;
@@ -69,8 +69,8 @@ function Session() {
 
   return (
     <div className="page">
-      <PageHead title={d.name} crumb={<Link href="/teach/">← Discovery</Link>} sub={<><code>{d.capability_id}</code>{d.version ? ` · v${d.version}` : ""} · started by {d.created_by} {ago(d.created_at)} ago</>}>
-        <TeachPill status={d.status} />
+      <PageHead title={d.name} crumb={<Link href="/discover/">← Discovery</Link>} sub={<><code>{d.capability_id}</code>{d.version ? ` · v${d.version}` : ""} · started by {d.created_by} {ago(d.created_at)} ago</>}>
+        <DiscoverPill status={d.status} />
         {active && <button className="btn sm danger" disabled={busy} onClick={() => post("/cancel", {}, "Stopping…").catch(() => {})}>Stop</button>}
       </PageHead>
 
@@ -88,7 +88,7 @@ function Session() {
         <Alert tone={d.status === "failed" ? "bad" : "warn"} title={d.status === "cancelled" ? "Stopped" : d.status === "failed" ? "It could not finish" : "The model got stuck"}>
           <span>{d.error ?? "No reason was recorded."}{d.reasoning && d.status === "stuck" ? ` The model said: “${d.reasoning}”.` : ""}</span>
           <span className="small muted">Nothing was saved. {d.status === "stuck" ? "A hint about where it went wrong usually fixes this." : ""}</span>
-          <div className="row" style={{ marginTop: 6 }}><Link className="btn primary" href={`/teach/new/?retry=${d.id}`}>Try again with a hint</Link></div>
+          <div className="row" style={{ marginTop: 6 }}><Link className="btn primary" href={`/discover/new/?retry=${d.id}`}>Try again with a hint</Link></div>
         </Alert>)}
       {d.status === "needs_attention" && (
         <Alert tone="warn" title="Saved as a draft, but it is not ready">
@@ -97,7 +97,7 @@ function Session() {
           {v?.ran && !v.passed && <span>Second set {v.inputs ? `(${Object.entries(v.inputs).map(([k, x]) => `${label(k)} ${String(x)}`).join(", ")})` : ""}: expected {v.expected}, got <strong>{v.business_outcome ?? v.status}</strong>{v.error ? ` (${v.error})` : ""}.</span>}
           {lintErrors.map((f, i) => <span key={i} className="small">• {f.message}</span>)}
           <div className="row" style={{ marginTop: 6 }}>
-            <Link className="btn primary" href={`/teach/new/?retry=${d.id}`}>Try again with a hint</Link>
+            <Link className="btn primary" href={`/discover/new/?retry=${d.id}`}>Try again with a hint</Link>
             {d.draft_url && <Link className="btn" href={`/artifact/?id=${encodeURIComponent(d.capability_id)}&version=${d.version}`}>Look at the recorded steps</Link>}
             <button className="btn danger" disabled={busy} onClick={() => setDlg("discard")}>Discard the draft</button>
           </div>
@@ -122,7 +122,7 @@ function Session() {
           <Turns turns={turns} active={active} onShot={(u, a) => setShot({ url: u, alt: a })} id={d.id} /></section>
         <div className="stack">
           <section className="card"><div className="card-head"><h2>{active ? "What it sees now" : "The last page it saw"}</h2></div>
-            <div className="card-body">{latest?.screenshot ? <Shot live path={`/v1/teach/${d.id}/screenshots/${latest.screenshot}`} alt="The page the model last looked at" onOpen={(u, a) => setShot({ url: u, alt: a })} /> : <p className="muted small">No picture yet.</p>}</div></section>
+            <div className="card-body">{latest?.screenshot ? <Shot live path={`/v1/discover/${d.id}/screenshots/${latest.screenshot}`} alt="The page the model last looked at" onOpen={(u, a) => setShot({ url: u, alt: a })} /> : <p className="muted small">No picture yet.</p>}</div></section>
           {d.contract && (
             <section className="card"><div className="card-head"><h2>What you asked for</h2></div><div className="card-body"><dl className="kv small">
               <dt>System</dt><dd>{d.target}</dd><dt>Effect</dt><dd>{label(d.effect)}</dd>

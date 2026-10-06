@@ -50,27 +50,27 @@ export interface CapMetrics { capability_id: string; runs: number; settled: numb
 export interface Metrics { capabilities: CapMetrics[]; totals: { runs: number; pending_approvals: number; pending_repairs: number; failing_canaries: string[] }; browser_pool: Record<string, number> }
 
 export interface ArtifactDiff { capability_id: string; version_a: string; version_b: string; metadata: string[]; schema: string[]; safety: string[]; error_handling: string[]; steps: { kind: string; step: string; summary: string; details: string[] }[] }
-export interface PolicyView { default_approval: string; teaching: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
+export interface PolicyView { default_approval: string; discovery: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
 export interface KeyRow { id: number; name: string; role: Role; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
 export interface RepairItemLite { id: string; confident: boolean; touches_irreversible_step: boolean }
 
 export interface Features { show_window: boolean; max_pace_ms: number; watch_presets: { slow: number; step_by_step: number } }
 
-export type TeachEffect = "read_only" | "changes_data" | "irreversible";
-export interface TeachInput { name: string; kind: "text" | "number"; required: boolean; example: string; description?: string | null; pattern?: string | null; choices?: string[] | null }
-export interface TeachContract {
+export type DiscoverEffect = "read_only" | "changes_data" | "irreversible";
+export interface DiscoverInput { name: string; kind: "text" | "number"; required: boolean; example: string; description?: string | null; pattern?: string | null; choices?: string[] | null }
+export interface DiscoveryContract {
   task_name: string; name: string; description: string; target: string; goal: string; start_path: string | null;
-  inputs: TeachInput[]; outputs: { name: string; description?: string | null }[]; success_text: string | null; success_status: string;
-  outcomes: { when_text: string; outcome: string }[]; effect: TeachEffect; commit_approval: "auto_sandbox" | "supervisor"; hint?: string | null;
+  inputs: DiscoverInput[]; outputs: { name: string; description?: string | null }[]; success_text: string | null; success_status: string;
+  outcomes: { when_text: string; outcome: string }[]; effect: DiscoverEffect; commit_approval: "auto_sandbox" | "supervisor"; hint?: string | null;
   verify?: { inputs: Record<string, string>; expect_outcome?: string | null; same_as_example?: boolean } | null; retry_on_text?: string | null; timeout_text?: string | null;
 }
-export interface TeachOptions { targets: { name: string; app_id: string; base_url: string; sandbox: boolean; read_only_only: boolean }[]; model_available: boolean; busy: boolean; limits: { max_steps: number; timeout_s: number; commit_wait_s: number } }
-export interface TeachTurn { n: number; url: string | null; title: string | null; screenshot: string | null; tool: string; summary: string; ok: boolean | null; error: string | null; value: string | null; reasoning: string | null; commit?: { approved: boolean; by: string | null; mode: string } }
-export interface TeachVerify { ran: boolean; passed?: boolean; status?: string; business_outcome?: string | null; outputs?: Record<string, unknown> | null; error?: string | null; warnings?: string[]; inputs?: Record<string, unknown>; expected?: string }
-export interface TeachSession {
-  id: string; created_by: string; created_at: string; finished_at: string | null; status: string; capability_id: string; version: string | null; target: string; name: string; effect: TeachEffect;
-  stop_reason: string | null; reasoning: string | null; steps: number | null; error: string | null; retry_of: string | null; verify: TeachVerify | null;
-  contract?: TeachContract; lint?: { level: string; code: string; message: string; step_id: string | null }[] | null;
-  commit_request?: { description: string; url: string; page_title: string; goal: string | null; at: string } | null; turns?: TeachTurn[]; draft_url?: string | null;
+export interface DiscoverOptions { targets: { name: string; app_id: string; base_url: string; sandbox: boolean; read_only_only: boolean }[]; model_available: boolean; busy: boolean; limits: { max_steps: number; timeout_s: number; commit_wait_s: number } }
+export interface DiscoverTurn { n: number; url: string | null; title: string | null; screenshot: string | null; tool: string; summary: string; ok: boolean | null; error: string | null; value: string | null; reasoning: string | null; commit?: { approved: boolean; by: string | null; mode: string } }
+export interface DiscoverVerify { ran: boolean; passed?: boolean; status?: string; business_outcome?: string | null; outputs?: Record<string, unknown> | null; error?: string | null; warnings?: string[]; inputs?: Record<string, unknown>; expected?: string }
+export interface DiscoverSession {
+  id: string; created_by: string; created_at: string; finished_at: string | null; status: string; capability_id: string; version: string | null; target: string; name: string; effect: DiscoverEffect;
+  stop_reason: string | null; reasoning: string | null; steps: number | null; error: string | null; retry_of: string | null; verify: DiscoverVerify | null;
+  contract?: DiscoveryContract; lint?: { level: string; code: string; message: string; step_id: string | null }[] | null;
+  commit_request?: { description: string; url: string; page_title: string; goal: string | null; at: string } | null; turns?: DiscoverTurn[]; draft_url?: string | null;
 }

@@ -19,7 +19,7 @@ import observability
 load_dotenv()
 
 from api.chat_v1 import router as chat_v1_router  # noqa: E402
-from api.teach_v1 import router as teach_router, service as teach_service  # noqa: E402
+from api.discover_v1 import router as discover_router, service as discover_service  # noqa: E402
 from api.v1 import router as v1_router  # noqa: E402
 
 
@@ -42,7 +42,7 @@ def _recover_interrupted_runs() -> None:
 async def _lifespan(_: FastAPI):
     observability.configure("INFO")
     _recover_interrupted_runs()
-    teach_service().recover()
+    discover_service().recover()
     yield
 
 
@@ -67,7 +67,7 @@ async def _log_v1_requests(request, call_next):
 
 app.include_router(v1_router)
 app.include_router(chat_v1_router)
-app.include_router(teach_router)
+app.include_router(discover_router)
 
 # The console (ui/, a static Next.js export) is served from the same process and port, under /ui. It exists once `npm run build` has run in ui/.
 UI_DIR = Path(__file__).resolve().parent.parent / "ui" / "out"

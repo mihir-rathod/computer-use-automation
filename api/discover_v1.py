@@ -1,12 +1,12 @@
-"""Teaching new tasks from the console.
+"""Discovery new tasks from the console.
 
-    GET  /v1/teach/options                  what can be taught where, and whether a model is configured
-    POST /v1/teach                          start a session from a contract (supervisor or above); one at a time
-    GET  /v1/teach  /v1/teach/{id}          sessions, and one session with the model's turns so far
-    POST /v1/teach/{id}/cancel|commit|discard|promote
-    GET  /v1/teach/{id}/screenshots/{name}
+    GET  /v1/discover/options                  what can be discovered where, and whether a model is configured
+    POST /v1/discover                          start a session from a contract (supervisor or above); one at a time
+    GET  /v1/discover  /v1/discover/{id}          sessions, and one session with the model's turns so far
+    POST /v1/discover/{id}/cancel|commit|discard|promote
+    GET  /v1/discover/{id}/screenshots/{name}
 
-Teaching only ever creates a draft: a version nobody can run until a supervisor promotes it. Promotion goes through the same policy
+Discovery only ever creates a draft: a version nobody can run until a supervisor promotes it. Promotion goes through the same policy
 tier as any other promotion.
 """
 from __future__ import annotations
@@ -26,21 +26,21 @@ from api.v1 import Principal, adir, require
 from artifacts_lib import storage
 from artifacts_lib.lint import has_errors, lint_artifact
 from safety.config import role_allows
-from teach import turns
-from teach.contract import TeachContract
-from teach.service import TeachError, TeachService, model_available, teachable_targets
+from discover import turns
+from discover.contract import DiscoveryContract
+from discover.service import DiscoveryError, DiscoveryService, model_available, discoverable_targets
 
-router = APIRouter(prefix="/v1/teach", tags=["teach"])
-_service: TeachService | None = None
+router = APIRouter(prefix="/v1/discover", tags=["discover"])
+_service: DiscoveryService | None = None
 _SHOT = re.compile(r"^[0-9]{3,}\.png$")
 
 
-def service() -> TeachService:
+def service() -> DiscoveryService:
     """Built per store/artifacts directory, so tests that point those elsewhere get their own."""
     global _service
     store, directory = runtime.default_store(), adir()
     if _service is None or _service.store is not store or _service.adir != directory:
-        _service = TeachService(store, directory, runtime.default_policy())
+        _service = DiscoveryService(store, directory, runtime.default_policy())
     _service.policy = runtime.default_policy()  # the file is re-read on every use, like everywhere else
     return _service
 
@@ -51,7 +51,7 @@ def _view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
         status = "promoted"
     out = {k: row[k] for k in ("id", "created_by", "created_at", "finished_at", "capability_id", "version", "target", "stop_reason", "reasoning", "steps", "error", "retry_of")}
     out["status"] = status
-    contract = TeachContract.model_validate_json(row["contract_json"])
+    contract = DiscoveryContract.model_validate_json(row["contract_json"])
     out["name"] = contract.name
     out["effect"] = contract.effect
     out["verify"] = json.loads(row["verify_json"]) if row.get("verify_json") else None
@@ -65,22 +65,22 @@ def _view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
 
 
 def _get(sid: str) -> dict[str, Any]:
-    row = runtime.default_store().teach_get(sid)
+    row = runtime.default_store().discovery_get(sid)
     if row is None:
-        raise HTTPException(404, f"unknown teaching session {sid}")
+        raise HTTPException(404, f"unknown discovery session {sid}")
     return row
 
 
-def _raise(exc: TeachError) -> HTTPException:
+def _raise(exc: DiscoveryError) -> HTTPException:
     return HTTPException(exc.status, str(exc))
 
 
 @router.get("/options")
 def options(_: Principal = Depends(require("supervisor"))) -> dict[str, Any]:
     policy = runtime.default_policy()
-    active = runtime.default_store().teach_active()
-    return {"targets": teachable_targets(policy), "model_available": model_available(), "busy": bool(active),
-            "limits": policy.teaching.model_dump(), "effects": ["read_only", "changes_data", "irreversible"]}
+    active = runtime.default_store().discovery_active()
+    return {"targets": discoverable_targets(policy), "model_available": model_available(), "busy": bool(active),
+            "limits": policy.discovery.model_dump(), "effects": ["read_only", "changes_data", "irreversible"]}
 
 
 class DraftRequest(BaseModel):
@@ -91,15 +91,15 @@ class DraftRequest(BaseModel):
 @router.post("/draft")
 def draft(body: DraftRequest, _: Principal = Depends(require("supervisor"))) -> dict[str, Any]:
     """Plain words in, a proposed contract out. Nothing is started and nothing is saved: the person confirms or edits it first."""
-    from teach.draft import draft_contract
-    from teach.service import get_model
+    from discover.draft import draft_contract
+    from discover.service import get_model
     policy = runtime.default_policy()
-    if body.target not in {t["name"] for t in teachable_targets(policy)}:
-        raise HTTPException(422, f"'{body.target}' is not a target tasks can be taught on")
+    if body.target not in {t["name"] for t in discoverable_targets(policy)}:
+        raise HTTPException(422, f"'{body.target}' is not a target tasks can be discovered on")
     if not model_available():
         raise HTTPException(503, "no model key is configured on the server (GEMINI_API_KEY)")
     try:
-        from teach.peek import peek_home
+        from discover.peek import peek_home
         profile = runtime.TARGET_PROFILES[body.target]
         drafted = draft_contract(get_model(), body.request, body.target, profile, menu=peek_home(profile, policy, adir()))
         if "contract" in drafted:
@@ -117,20 +117,20 @@ def draft(body: DraftRequest, _: Principal = Depends(require("supervisor"))) -> 
 @router.post("")
 def start(body: dict[str, Any], who: Principal = Depends(require("supervisor"))) -> dict[str, Any]:
     try:
-        contract = TeachContract.model_validate(body.get("contract", body))
+        contract = DiscoveryContract.model_validate(body.get("contract", body))
     except ValidationError as exc:
         raise HTTPException(422, [{"field": ".".join(str(p) for p in e["loc"]),
                                    "msg": ".".join(str(p) for p in e["loc"] if not isinstance(p, int)) + ": " + e["msg"].removeprefix("Value error, ")} for e in exc.errors()]) from None
     try:
         row = service().start(contract, who.name, retry_of=body.get("retry_of"))
-    except TeachError as exc:
+    except DiscoveryError as exc:
         raise _raise(exc) from None
     return _view(row)
 
 
 @router.get("")
 def list_sessions(_: Principal = Depends(require("supervisor"))) -> dict[str, Any]:
-    return {"sessions": [_view(r) for r in runtime.default_store().teach_list()]}
+    return {"sessions": [_view(r) for r in runtime.default_store().discovery_list()]}
 
 
 @router.get("/{sid}")
@@ -152,7 +152,7 @@ def cancel(sid: str, _: Principal = Depends(require("supervisor"))) -> dict[str,
     _get(sid)
     try:
         service().cancel(sid)
-    except TeachError as exc:
+    except DiscoveryError as exc:
         raise _raise(exc) from None
     return {"ok": True}
 
@@ -168,9 +168,9 @@ def commit(sid: str, body: CommitAnswer, who: Principal = Depends(require("super
     _get(sid)
     try:
         row = service().decide_commit(sid, body.approve, who.name, body.reason)
-    except TeachError as exc:
+    except DiscoveryError as exc:
         raise _raise(exc) from None
-    observability.log("teach.commit_decided", session_id=sid, approved=body.approve, by=who.name)
+    observability.log("discover.commit_decided", session_id=sid, approved=body.approve, by=who.name)
     return _view(row)
 
 
@@ -179,7 +179,7 @@ def discard(sid: str, _: Principal = Depends(require("supervisor"))) -> dict[str
     _get(sid)
     try:
         service().discard(sid)
-    except (TeachError, ValueError) as exc:
+    except (DiscoveryError, ValueError) as exc:
         raise HTTPException(getattr(exc, "status", 409), str(exc)) from None
     return _view(_get(sid))
 
@@ -206,5 +206,5 @@ def promote(sid: str, body: Promotion, who: Principal = Depends(require("supervi
     if has_errors(findings):
         raise HTTPException(409, "validation errors: " + "; ".join(str(f) for f in findings if f.level == "error"))
     storage.set_current(row["capability_id"], row["version"], adir(), by=who.name, reason=body.reason)
-    observability.log("teach.promoted", session_id=sid, capability_id=row["capability_id"], by=who.name)
+    observability.log("discover.promoted", session_id=sid, capability_id=row["capability_id"], by=who.name)
     return _view(_get(sid))

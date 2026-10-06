@@ -93,7 +93,7 @@ def test_inbox_collects_everything_waiting_for_a_person(api, clinic_base_url):
     assert [r["id"] for r in inbox["needs_review"]] == [lost]
     [repair] = inbox["repairs"]
     assert repair["confident"] and repair["new_locators"] and repair["has_screenshot"] and repair["capability_id"] == "clinic.login"
-    assert inbox["counts"] == {"approvals": 1, "needs_review": 1, "repairs": 1, "teach_commits": 0, "total": 3}
+    assert inbox["counts"] == {"approvals": 1, "needs_review": 1, "repairs": 1, "discovery_commits": 0, "total": 3}
     assert api.get(f"/v1/repairs/{repair['id']}/screenshot", headers=api.h("alex")).headers["content-type"] == "image/png"
     assert api.get(f"/v1/repairs/{repair['id']}/screenshot", headers=api.h("vic")).status_code == 403
 

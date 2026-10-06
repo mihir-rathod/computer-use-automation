@@ -262,7 +262,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
 
 
 def cmd_canary(args: argparse.Namespace) -> int:
-    import canary
+    from repair import canary
     if args.canary_command == "history":
         for row in runtime.default_store().canary_history(args.capability, args.limit):
             print(f"{row['at']}  {'ok  ' if row['ok'] else 'FAIL'} {row['capability_id']} {row['version']}  {row['detail']}" + (f"  repair={row['repair_id']}" if row["repair_id"] else ""))

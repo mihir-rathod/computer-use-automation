@@ -8,7 +8,7 @@ import { Dialog } from "./ui";
 import { IconAuto, IconBolt, IconChart, IconChat, IconFile, IconGrid, IconInbox, IconKey, IconMoon, IconPlay, IconShield, IconSun } from "./icons";
 
 const ICONS: Record<NavItem["icon"], ReactNode> = {
-  tasks: <IconGrid />, teach: <IconBolt />, runs: <IconPlay />, inbox: <IconInbox />, chat: <IconChat />, overview: <IconChart />, artifacts: <IconFile />, policy: <IconShield />, keys: <IconKey />,
+  tasks: <IconGrid />, discover: <IconBolt />, runs: <IconPlay />, inbox: <IconInbox />, chat: <IconChat />, overview: <IconChart />, artifacts: <IconFile />, policy: <IconShield />, keys: <IconKey />,
 };
 
 export function Shell({ children }: { children: ReactNode }) {

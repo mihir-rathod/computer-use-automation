@@ -65,7 +65,7 @@ def test_each_role_sees_only_its_own_job_in_the_navigation(page, console):
 
     console.open(page, "dana")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
-    assert nav_names(page) == ["Tasks", "My runs", "Inbox", "Chat", "Discover"]        # a supervisor decides things and teaches new ones; it does not manage the platform
+    assert nav_names(page) == ["Tasks", "My runs", "Inbox", "Chat", "Discover"]        # a supervisor decides things and discovers new ones; it does not manage the platform
 
     console.open(page, "vic")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
