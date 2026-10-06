@@ -38,6 +38,7 @@ from api.chatbot import router as chatbot_router
 from api.dashboard import router as dashboard_router
 from api.v1 import router as v1_router
 from api.chat_v1 import router as chat_v1_router
+from api.teach_v1 import router as teach_router, service as teach_service
 
 def _recover_interrupted_runs() -> None:
     """Runs left `running`/`queued` by a process that died would block their idempotency keys for ever."""
@@ -58,6 +59,7 @@ def _recover_interrupted_runs() -> None:
 async def _lifespan(_: FastAPI):
     observability.configure("INFO")
     _recover_interrupted_runs()
+    teach_service().recover()
     yield
 
 
@@ -85,6 +87,7 @@ app.include_router(chatbot_router)
 app.include_router(dashboard_router)
 app.include_router(v1_router)
 app.include_router(chat_v1_router)
+app.include_router(teach_router)
 
 # The console (ui/, a static Next.js export) is served from the same process and port, under /ui. It exists once `npm run build` has run in ui/.
 UI_DIR = Path(__file__).resolve().parent.parent / "ui" / "out"

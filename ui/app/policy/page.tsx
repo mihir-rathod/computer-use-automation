@@ -18,7 +18,7 @@ export default function Policy() {
           {Object.entries(d.capabilities).map(([id, c]) => <tr key={id}><td className="mono">{id}</td><td><span className="tag">{c.approval}</span></td>
             <td>{Object.keys(c.caps.max_param).length ? Object.entries(c.caps.max_param).map(([k, v]) => `${label(k)} ≤ ${v}`).join(", ") : <span className="muted">no limit</span>}</td><td className="num">{c.caps.max_commits_per_day ?? "—"}</td></tr>)}
         </tbody></table></div>
-        <div className="card-body small muted">A capability not listed defaults to <span className="tag">live</span>: its irreversible step is blocked until a person confirms it during the run.</div></section>
+        <div className="card-body small muted">A capability not listed here defaults to <span className="tag">{d.default_approval}</span>{d.default_approval === "live" ? ": its irreversible step is blocked until a person confirms it during the run" : ": a task with an irreversible step waits for that kind of approval before it runs"}. Tasks taught from the console land here, so a new task is never less guarded than the default.</div></section>
       <div className="grid-2">
         <section className="card"><div className="card-head"><h2>People who may approve</h2></div><div className="card-body">
           <p className="small muted" style={{ marginBottom: 8 }}>Used by the command line. Over the API, your key's role decides.</p>

@@ -294,3 +294,20 @@ def test_repairing_a_step_also_repairs_its_checkpoint_on_the_same_element(world,
     assert s2.checkpoint.target.locators == s2.target.locators
     assert any(l.value.startswith("[name='f") for l in s2.target.locators)  # the renamed field's new HTML name
     assert any(l.value == "[name='username']" for l in s2.target.locators)  # the old locator stays behind as a fallback
+
+
+def test_a_lost_session_is_reported_as_one_and_does_not_create_a_repair_proposal(world, arts, tmp_path):
+    """Seen in the console: a run sent back to the sign-in page mid-way produced a 'No clear match' repair proposal against the sign-in page."""
+    import json
+
+    path = arts / "clinic.patient_lookup" / "1.0.0.json"
+    art = json.loads(path.read_text())
+    art["error_handling"]["recoverable"] = []                   # no rule to recover from a timeout, so the failure is what a lost session really looks like
+    path.write_text(json.dumps(art))
+    httpx.post(f"{world[0]}/_test/chaos", json={"kind": "expire_session", "method": "GET", "path_glob": "/legacy/patients", "remaining": 1}, timeout=5)
+
+    result = replay(world, arts, tmp_path)
+
+    assert result.status == ReplayStatus.HARD_FAILURE and result.error.code == "session_lost"
+    assert "sign-in page" in result.error.message and "Nothing was changed" in result.error.message
+    assert result.repair_proposal_id is None and runtime.default_store().list_repairs() == []

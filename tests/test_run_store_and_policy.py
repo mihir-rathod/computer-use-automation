@@ -169,7 +169,7 @@ def test_shipped_policy_loads_and_has_the_expected_shape():
     policy = PolicyConfig.load()
     assert policy.for_capability("clinic.issue_refund").approval == "supervisor"
     assert policy.for_capability("clinic.issue_refund").caps.max_param == {"amount": 1000.0}
-    assert policy.for_capability("something.unlisted").approval == "live"
+    assert policy.for_capability("something.unlisted").approval == "supervisor"  # an unlisted capability with a commit step needs a supervisor
 
 
 def test_bad_policy_is_rejected_at_load(tmp_path):

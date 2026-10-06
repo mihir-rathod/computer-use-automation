@@ -41,9 +41,10 @@ def get_client() -> Any:
 
 def build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
     declarations, by_name = [], {}
+    hidden = runtime.hidden_apps()
     for artifact in storage.list_artifacts(adir()):
-        if artifact.preconditions is None:
-            continue  # sign-on is plumbing
+        if artifact.preconditions is None or artifact.target.app_id in hidden:
+            continue  # sign-on is plumbing, and a hidden system is not offered in the console
         props = {n: types.Schema(type=_json_type_to_gemini(p.get("type")), description=p.get("description")) for n, p in artifact.input_schema.properties.items()}
         note = " Changes data." if artifact.safety.risk_level.value == "state_changing" else " Read-only."
         declarations.append(types.FunctionDeclaration(name=_function_name(artifact.capability_id), description=f"{artifact.description}{note} (system: {artifact.target.app_id})",

@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { actionableCount, navFor, type NavItem } from "@/lib/access";
 import { useApi, useAuth, useTheme } from "@/lib/hooks";
 import { Dialog } from "./ui";
-import { IconAuto, IconChart, IconChat, IconFile, IconGrid, IconInbox, IconKey, IconMoon, IconPlay, IconShield, IconSun } from "./icons";
+import { IconAuto, IconBolt, IconChart, IconChat, IconFile, IconGrid, IconInbox, IconKey, IconMoon, IconPlay, IconShield, IconSun } from "./icons";
 
 const ICONS: Record<NavItem["icon"], ReactNode> = {
-  tasks: <IconGrid />, runs: <IconPlay />, inbox: <IconInbox />, chat: <IconChat />, overview: <IconChart />, artifacts: <IconFile />, policy: <IconShield />, keys: <IconKey />,
+  tasks: <IconGrid />, teach: <IconBolt />, runs: <IconPlay />, inbox: <IconInbox />, chat: <IconChat />, overview: <IconChart />, artifacts: <IconFile />, policy: <IconShield />, keys: <IconKey />,
 };
 
 export function Shell({ children }: { children: ReactNode }) {

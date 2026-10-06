@@ -348,7 +348,7 @@ def cmd_artifact(args: argparse.Namespace) -> int:
     if action == "list":
         for cid in storage.capability_ids():
             versions, current = storage.list_versions(cid), storage.current_version(cid)
-            print(f"{cid}  current={current}  versions={','.join(versions)}")
+            print(f"{cid}  current={current or 'none (a draft: not runnable until promoted)'}  versions={','.join(versions)}")
         return 0
     if action == "show":
         print(load_artifact_by_id(args.capability, version=args.version).model_dump_json(indent=2))
@@ -357,7 +357,9 @@ def cmd_artifact(args: argparse.Namespace) -> int:
         ids = storage.capability_ids() if args.all else [args.capability]
         failed = False
         for cid in ids:
-            artifact = load_artifact_by_id(cid, version=args.version)
+            # a draft (discovered, never promoted) has no current version: check its latest
+            version = args.version or (None if storage.current_version(cid) else storage.list_versions(cid)[-1])
+            artifact = load_artifact_by_id(cid, version=version)
             findings = lint_artifact(artifact)
             failed |= has_errors(findings)
             print(f"{cid} {artifact.version}: {'FAIL' if has_errors(findings) else 'ok'} ({len(findings)} finding(s))")

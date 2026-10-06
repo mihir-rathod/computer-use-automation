@@ -182,6 +182,71 @@ click in it, was deliberately not attempted.
 served by the API process under `/ui`: one process, one port, nothing to deploy separately. Routes use query strings (`/run/?id=...`) because a static
 export cannot pre-render unknown ids.
 
+## Discovery from the console (phase 4, step 3)
+
+**The aim is "use the model once, replay a bazillion times", so the flow starts from a sentence.** The command line's discovery works from a spec a person wrote
+in `agent/catalog*.py` (inputs, outputs, success text, normal answers, risk, and a goal that is often quite prescriptive). Copying that into a long web form
+would have moved the work, not removed it. The console now asks for a sentence and a real example, shows the model the system's main page, and gets a drafted
+contract back (`teach/draft.py`, `teach/peek.py`). The person confirms it. The full form is still there, under *More details*, for anything the draft got wrong.
+
+**What stays a person's call.** Whether the task only reads or changes something is shown first and must be confirmed, because the commit rules hang on it: a
+declared read-only task refuses every commit request, and an unreadable answer from the model is treated as the cautious one. The draft also never invents an
+example value (it asks), and a password-like input name is refused outright.
+
+**Showing the model the real menu.** The first live attempt from one sentence got stuck: the drafting model had imagined an "Appointments" search the clinic does not
+have, and discovery then guessed URLs. Drafting now sees the names of the links and buttons on the signed-on main page and is told to use only those, and the
+discovery prompt says never to guess a URL and to open the closest-sounding link when nothing is named exactly. The same request then succeeded.
+
+**The model can only click and type, not navigate.** Told never to guess a URL, a small model guessed them anyway: one live run spent 23 of its 25 steps typing
+made-up addresses after it had already reached the right page. During console discovery the navigate tool is simply not offered (`DiscoveryLoop(allow_navigate=False)`),
+so the only way to move is a link or button that is on the page. The start page is still opened by the system, and the CLI's discovery is unchanged.
+
+**A recording that ignores its input is not ready.** The model once found "the" appointment by browsing the schedule and recorded a hard-coded read; the replay with the
+same example "worked" and the checker's *input declared but unused* note was only a note. It now blocks: the session ends as needing attention and says why. Likewise a task
+described as committing something that recorded no commit step is not ready (running it would do nothing), and a model that finishes without reading everything asked is not saved.
+
+**Example values are replaced only where they stand alone.** The recorder turned the example into `{{name}}` by blind substring replacement, which is how an email that
+contained a member id was once corrupted. It now replaces longest value first and only when the value is not part of a longer word or number, and the contract refuses two
+inputs with the same example or an example of one character.
+
+**Success text and reads that belong to one record.** The system never picks a success text that contains an example value or anything the model read (a heading with the
+patient's name would fail for every other patient). Reads that are not one of the task's outputs, and a value read twice, are dropped, and a field typed twice (a corrected
+typo) is typed once with the value that stuck.
+
+**When the system goes away.** A connection error during discovery (a restart, a crash) ends the session at once with a plain message instead of leaving the model to
+guess at a browser error page for the rest of its steps. A model that keeps returning to the same page is told so after the third visit.
+
+**A recording that works for the example is checked on others.** The tests record a task on one appointment, promote it, and run it for fourteen others (other patients,
+providers, statuses), comparing every answer with the clinic's own page; the live-model test does the same.
+
+**A recording keeps only the way that worked.** Left to find its own way the model wandered (one live run: 15 steps, 9 of them detours and dead ends), and the
+recording kept all of it, so the replay failed on a step from the detour. `teach/prune.py` drops failed actions and, if the model went back to where it started and
+began again, keeps only the last attempt. The verification replay then has to pass, which is what shows the pruned version is enough.
+
+**The success text is decided, then proved.** When the person does not say what shows success, the system picks a heading or label from the page the answer was read
+from that the earlier pages did not have, checks it is on that page, and the replay has to see it again (`teach/derive.py`). It is a heuristic; the provenance note says
+the text was chosen by the system. Normal answers such as "not found" are not discovered; the person adds them under *More details*.
+
+**Checking without a second set of values.** A read-only task is replayed once with its own example, with no model, which proves the recording stands on its own. It
+cannot prove the task works for other values; the form offers a second set for that. A task that changes data is never replayed with its own example, because it would
+change it twice.
+
+**Sandbox first, read-only elsewhere.** The step that commits something is really taken while discovering, because that is how it is recorded from a run instead of
+written by hand. That is only acceptable on a practice copy, so anything that changes data needs a sandbox target; a non-sandbox target is off by default and, when
+enabled, read-only only.
+
+**A draft is a version with no promoted current.** The old rule ("the first version of a capability becomes current automatically") made a discovered task runnable
+the moment it was saved. Discovered versions are saved with `make_current=False`, and a capability whose index has no current version is a draft: it is left out of the
+task list, refused by `load_artifact_by_id`, and can be opened by version for review or deleted. Promotion is the existing path.
+
+**Unlisted capabilities default to `supervisor`, not `live`.** The old default (`live`: confirm on the operator console mid-run) assumed a person at the console. A task
+nobody has configured now needs a recorded supervisor approval before it runs if it commits something. `mockbank.open_subaccount` is listed explicitly as `live` to keep the
+demo as it was.
+
+**One session at a time, on its own thread.** The model's quota is shared and a person is watching, so a second session is refused with who has the first. The session runs
+on a daemon thread rather than the browser pool, so a long wait for an answer cannot starve ordinary runs or keep the server from stopping. A session left active by a
+dead process is marked failed at startup.
+
 ## Decisions and why
 
 **The model discovers; code structures.** `agent/loop.py` only decides what to click, type or
@@ -323,6 +388,10 @@ Found while adding watch mode and role-based navigation:
 31. **A test run leaked into the next test.** A chat test started a paced run and did not wait for it, so its pauses were counted by an unrelated test. Tests
     that start background runs now wait for them.
 
+32. **A lost session produced a repair proposal.** A run sent back to the system's sign-in page mid-way (a restart, a timeout) looked like a broken
+    locator, so the inbox got a "no clear match" proposal made against the sign-in page. A run that ends on the sign-in page is now reported as
+    `session_lost`, with no proposal. A failed connection is likewise reported as `target_unreachable` in plain words instead of a browser error.
+
 Found while building the console:
 
 27. **A sign-on failure was blamed on the task's own step.** Sign-on is itself a replayed capability whose steps are numbered s1, s2 ... like any other,
@@ -331,6 +400,31 @@ Found while building the console:
 28. **The test suite could run recovery against the developer's real run database.** The in-process API server is session-scoped and starts before any
     per-test environment is set, so its startup recovery (which closes runs a dead process left running) read `data/runs.db`. A test run beside a live
     server could have marked its in-flight runs interrupted. The suite now points at a temporary database before anything is imported.
+
+Found while building discovery from the console:
+
+33. **The console's `lib` folder was never committed.** `.gitignore` carried the Python template's `lib/`, which also matched `ui/lib/`, so the phase 4 commit
+    contained pages and components but not the API client, hooks or types; a fresh clone could not build the console. Fixed with an exception for `ui/lib/`.
+34. **A session waiting for a person could keep the process alive.** Sessions ran on a pool thread, and Python waits for those at exit, so a session paused on a
+    commit question held up shutdown (found when a failing test never returned). Sessions now run on daemon threads.
+35. **Every reason dialog used the same field id.** Dialogs on a page are all mounted, so each "Reason" label pointed at the first textarea and the one on screen
+    could not be reached by its label (a screen reader would have read the wrong field). Each dialog now gets its own id. Three older browser tests had leaned on
+    the bug and now target the open dialog.
+36. **Making unlisted tasks need a supervisor broke rollback.** Promote and rollback checked the policy tier even for a capability that only reads, so after the
+    default changed to `supervisor` an operator could no longer roll back sign-on. The tier now applies only to capabilities with an irreversible step. Found by the
+    existing suite, not by reading the change.
+37. **A recording kept the model's wandering.** Given only a sentence, the model opened wrong pages, tried filters and went back to the menu before finding the
+    answer, and every one of those steps went into the artifact. The replay then failed on a detour step. Recordings are now pruned to the way that worked (see above).
+38. **Discovery guessed URLs.** With a goal that did not name a screen, the model typed made-up addresses (one was blocked by the allowlist) instead of using the menu.
+    The prompt now forbids it and drafting is shown the real menu. That was not enough for a small model (see above): navigation is no longer offered.
+39. **A recording ignored its input and its replay still passed.** The model browsed a schedule list instead of using the lookup, so the artifact read the same cell for any
+    input. The replay with the example matched, and the unused-input note was ignored. It now blocks, and a sweep over other records exists to catch the general case.
+40. **A success text only true for the example.** The system chose a heading, "Appointment A-20002", that contained the example, so every other appointment would have failed
+    its own success check. Candidates containing an example value or a value that was read are skipped.
+41. **Pruning dropped a step it should have kept.** The "went back to the start page" rule counted typing into the start page's own form as going back, and removed the typing,
+    so the recording looked up nothing. A restart is now only counted when the model arrives at the start page from somewhere else.
+42. **A restarted target left the session guessing.** After the target was restarted mid-session the model kept acting on a browser error page until its steps ran out. A connection
+    error now ends the session at once.
 
 ## Measured: drift and repair
 
@@ -361,7 +455,7 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Claim | Backed by |
 |---|---|
 | Replay path cannot call a model | No import of `agent/` or a model SDK anywhere in the replay path (checked by grep) |
-| Platform behavior | 312 offline tests: schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases, observability, MCP |
+| Platform behavior | 422 offline tests (430 in all with the model-backed ones; the clinic's own 64 are among them): schema, replay engine, safety, sessions, operator console, API, dashboard, web surface, artifact versioning/lint/diff, replay hardening, run store and policy, commit recording, browser pool, clinic capabilities (incl. partial updates), repair and canary, the v1 API, edge cases, observability, MCP |
 | Clinic target behavior | 62 tests: business rules, audit and exactly-once semantics, JSON API, both skins, test kit, and 16 real-browser tests |
 | A retried commit posts exactly once | `tests/test_clinic_capabilities.py`: same-key retry, response lost after commit, request lost before commit; all asserted on the clinic audit log with its own duplicate guard off |
 | The console works for each role, in a real browser | `tests/ui/test_console.py`: sign-in and revoked keys, catalog filters, form validation, a live run with screenshots, a partial update, a refund held for approval then approved by a supervisor with a reason (the requester and a viewer cannot), unknown-outcome settling, drift to repair to rollback, chat history and drafts, key admin, shortcuts and theme, empty and error states |
@@ -373,6 +467,10 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 | Drift yields a repair proposal; approval makes a new version; rollback works | `tests/test_repair_and_canary.py`, `scripts/drift_report.py` |
 | Commit steps can be recorded from a run | `tests/test_commit_recording.py` (scripted model, real browser, real clinic) and the 4 checked-in artifacts whose provenance records an `auto_sandbox` approval |
 | LLM discovery works end to end | `tests/test_discovery_live.py` (skips without `GEMINI_API_KEY`) |
+| Discovery from the console is bounded, recorded and reviewed | `tests/test_teaching.py`: a read-only task is discovered, verified and left as a draft nobody can run; a plain-words request is drafted into a contract (asking when an example is missing, treating an unreadable effect as the cautious one, refusing secrets) and discovered from the main page with its success text chosen by the system; wandering is pruned and the rest replays; a read-only task that tries to commit posts nothing; a missing output is not saved; verification catches a task that only works for its example; promote by a supervisor then run by an operator; discard leaves nothing; a commit waits for a supervisor and is recorded once with its approver; declined and cancelled commits post nothing; one session at a time; bad contracts refused before a browser starts; no key means nothing starts |
+| Discovery edge cases are covered | `tests/test_discovery_edge_cases.py` (example replaced only where it stands alone, ambiguous examples refused, a corrected typo and stray reads dropped, a trip back to the start dropped, success text never a read value, a system that goes away, a model going in circles) and in `tests/test_teaching.py` a recording made on one appointment replayed for fourteen others against the clinic's own pages |
+| Discovery works from the console | `tests/ui/test_teach_console.py`: role visibility, the whole form to a promoted task, the commit question, stuck then try again with the form filled in, a refused contract explained |
+| The real model can draft and discover a read-only task from one sentence | `tests/test_teaching_live.py` (skips without `GEMINI_API_KEY`). One live run from a sentence: it drafted the contract, explored 15 steps, 9 were pruned, the 6 kept replayed with no model and the success text was chosen by the system, in about 20 seconds; before the fixes above the same request got stuck. Five live runs in all is not a success rate; the last three each produced a 6-step recording whose answers were right for all fourteen other appointments |
 | Measured success and recovery rates | **Not yet measured.** A benchmark harness is planned. |
 
 ## Limitations
@@ -424,6 +522,17 @@ These are verified against the code as of this writing.
   (a rehearsal run could supply that); policy is read-only in the UI; the API key sits in the browser's local storage, so it is as safe as the origin
   is from script injection; and nothing has been checked with a screen reader beyond semantic markup, labels, focus handling and native dialogs.
   Screenshots shown in it cannot be redacted, which is why they are kept for sandbox targets only.
+- **Discovery from the console is new and thinly proven.** The real model has discovered one read-only task, from a sentence once and from a written-out goal twice.
+  Nothing yet shows how often it finishes a changing task, or what a vague request costs in steps (the one run took 15, mostly detours). Discovering a task that commits has only
+  been run with a scripted model, and the pruning rules were tuned on that one wander. The practice systems are the only ones in the repo, so
+  teaching on a real system (read-only, behind `teaching.non_sandbox_read_only`) has never been exercised, and would also need a way to give the model a sign-on
+  that is not a stored profile.
+- **The same supervisor can teach, answer the commit question and promote.** The commit step happens on the practice system and is recorded with the
+  answerer's name; promotion goes through the policy tier. There is no second-person rule for teaching as there is for approving a run.
+- **A discovered task is as good as its contract.** The checks are the success text (often chosen by the system), the normal answers (never discovered; a lookup for
+  something that does not exist ends as a failure until a person adds one), the pattern on each input and one replay. A task whose success text also appears on a failure page
+  would pass them, and a replay with its own example proves the recording stands alone, not that it works for other values. The recorded steps are reviewed on the artifact page, not edited there.
+- **A task discovered under `clinic_supervisor` records it as a clinic task.** It must then be run with that target; the console does not yet say so.
 - **The older API and the chat are still in-process and synchronous.** Chat history is one global list in memory (every visitor shares
   it and a restart clears it), the page reloads itself while a run is pending, which discards a half-typed message, and the chatbot runs
   every clinic task as the front-desk account. The operator console starts at import time on a fixed port. v1 has no rate limiting.

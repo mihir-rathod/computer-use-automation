@@ -98,7 +98,7 @@ def test_an_unreachable_target_closes_the_run_and_frees_its_key(monkeypatch):
     monkeypatch.setattr(runtime, "_replay_in_browser", boom)
     res, _ = runtime.run_replay("mockbank.member_balance_lookup", {"member_id": "10001"}, idempotency_key="kk", enable_operator_console=False)
 
-    assert res.status == ReplayStatus.HARD_FAILURE and res.error.code == "runner_error" and "CONNECTION_REFUSED" in res.error.message
+    assert res.status == ReplayStatus.HARD_FAILURE and res.error.code == "target_unreachable" and "Couldn't reach" in res.error.message
     assert runtime.default_store().get(res.run_id)["status"] == "hard_failure"
 
     fake_browser(monkeypatch)
@@ -202,3 +202,18 @@ def test_a_headed_browser_is_released_once_the_person_closes_its_windows():
     started = time.monotonic()
     runtime._wait_until_closed_by_user(Browser(), max_s=1.2)
     assert 1.0 < time.monotonic() - started < 3
+
+
+def test_an_unreachable_system_is_explained_plainly_and_can_be_retried(monkeypatch):
+    """Seen in the console: with the clinic not running, a failed run showed a raw Playwright line (net::ERR_CONNECTION_REFUSED)."""
+    def refused(*a, **k):
+        raise RuntimeError("Page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:8100/legacy/login\nCall log:\n  - navigating")
+
+    monkeypatch.setattr(runtime, "_replay_in_browser", refused)
+    res, _ = runtime.run_replay("clinic.patient_lookup", {"mrn": "LK-100001"}, target="clinic", idempotency_key="down-1", enable_operator_console=False)
+
+    assert res.status == ReplayStatus.HARD_FAILURE and res.error.code == "target_unreachable"
+    assert "Couldn't reach http://localhost:8100" in res.error.message and "Nothing was changed" in res.error.message and "Playwright" not in res.error.message
+    fake_browser(monkeypatch)
+    again, _ = runtime.run_replay("clinic.patient_lookup", {"mrn": "LK-100001"}, target="clinic", idempotency_key="down-1", enable_operator_console=False)
+    assert again.status == ReplayStatus.SUCCESS  # the key was freed, so retrying once the system is back just works

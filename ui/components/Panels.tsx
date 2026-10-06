@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { ApiError, api, fetchBlobUrl } from "@/lib/api";
 import { useAuth, useToast } from "@/lib/hooks";
 import { atLeast, type RunView, type SignOn, type TimelineStep } from "@/lib/types";
@@ -10,6 +10,7 @@ import { Dialog, Field } from "./ui";
 export function ReasonDialog({ open, onClose, title, confirm, danger, onSubmit, extra, intro }: {
   open: boolean; onClose: () => void; title: string; confirm: string; danger?: boolean; intro?: ReactNode; extra?: ReactNode; onSubmit: (reason: string) => Promise<void>;
 }) {
+  const fieldId = useId();  // one per dialog: several are mounted at once on the inbox
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -22,8 +23,8 @@ export function ReasonDialog({ open, onClose, title, confirm, danger, onSubmit, 
   return (
     <Dialog open={open} onClose={onClose} title={title} footer={<><button className="btn" onClick={onClose} disabled={busy}>Cancel</button><button className={`btn ${danger ? "danger" : "primary"}`} onClick={go} disabled={busy}>{busy ? "Working…" : confirm}</button></>}>
       {intro}{extra}
-      <Field id="reason" label="Reason" error={err} hint="Recorded in the audit trail with your name.">
-        <textarea id="reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} aria-invalid={!!err} autoFocus />
+      <Field id={fieldId} label="Reason" error={err} hint="Recorded in the audit trail with your name.">
+        <textarea id={fieldId} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} aria-invalid={!!err} autoFocus />
       </Field>
     </Dialog>
   );

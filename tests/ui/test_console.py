@@ -65,7 +65,7 @@ def test_each_role_sees_only_its_own_job_in_the_navigation(page, console):
 
     console.open(page, "dana")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
-    assert nav_names(page) == ["Tasks", "My runs", "Inbox", "Chat"]                 # a supervisor decides things; it does not manage the platform
+    assert nav_names(page) == ["Tasks", "My runs", "Inbox", "Chat", "Discover"]        # a supervisor decides things and teaches new ones; it does not manage the platform
 
     console.open(page, "vic")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
@@ -73,7 +73,7 @@ def test_each_role_sees_only_its_own_job_in_the_navigation(page, console):
 
     console.open(page, "root")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
-    assert nav_names(page) == ["Tasks", "Runs", "Inbox", "Chat", "Overview", "Artifacts", "Policy", "API keys"]
+    assert nav_names(page) == ["Tasks", "Runs", "Inbox", "Chat", "Discover", "Overview", "Artifacts", "Policy", "API keys"]
     expect(page.get_by_text("Manage", exact=True)).to_be_visible()
 
 
@@ -165,7 +165,7 @@ def test_a_refund_waits_then_a_supervisor_approves_it_with_a_reason(page, consol
     page.get_by_role("button", name="Approve and run").click()
     page.get_by_role("button", name="Approve and run").last.click()               # the dialog's confirm button, with no reason yet
     expect(page.get_by_text("A reason is required")).to_be_visible()
-    page.get_by_label("Reason").fill("Invoice checked against the ledger")
+    page.locator("dialog[open]").get_by_label("Reason").fill("Invoice checked against the ledger")
     page.get_by_role("button", name="Approve and run").last.click()
 
     page.goto(run_url)
@@ -210,7 +210,7 @@ def test_an_unknown_commit_outcome_is_settled_from_the_inbox(page, console):
     expect(page.get_by_text("not retried")).to_be_visible()
     page.get_by_role("button", name="Settle this run").click()
     page.get_by_role("radio", name="It did take effect").click()
-    page.get_by_label("Reason").fill("Refund is in the ledger")
+    page.locator("dialog[open]").get_by_label("Reason").fill("Refund is in the ledger")
     page.get_by_role("button", name="Record outcome").click()
     expect(page.get_by_text("You're all caught up")).to_be_visible()
     assert runtime.default_store().get(run_id)["resolution"] == "committed"
@@ -232,7 +232,7 @@ def test_a_screen_change_becomes_a_repair_that_a_person_approves_and_can_roll_ba
     expect(page.get_by_text("Clear match")).to_be_visible()
     expect(page.get_by_text("+ role: button[name='Log in']")).to_be_visible()
     page.get_by_role("button", name="Approve repair").click()
-    page.get_by_label("Reason").fill("Sign-on button was relabelled")
+    page.locator("dialog[open]").get_by_label("Reason").fill("Sign-on button was relabelled")
     page.get_by_role("button", name="Approve and promote").click()
     expect(page.get_by_text("You're all caught up")).to_be_visible()
 
@@ -243,7 +243,7 @@ def test_a_screen_change_becomes_a_repair_that_a_person_approves_and_can_roll_ba
     page.get_by_label("To version").select_option("1.0.1")
     expect(page.get_by_text("button[name='Log in']").first).to_be_visible()
     page.get_by_role("button", name="Roll back").click()
-    page.get_by_label("Reason").fill("Back out for the test")
+    page.locator("dialog[open]").get_by_label("Reason").fill("Back out for the test")
     page.get_by_role("button", name="Roll back").last.click()
     expect(page.get_by_text("Rolled back.")).to_be_visible()
 

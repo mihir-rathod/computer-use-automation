@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
 import { label } from "@/lib/format";
 import { IconAlert, IconCheck, IconClock, IconDot, IconSpinner, IconX, IconEye, IconBolt } from "./icons";
@@ -58,14 +58,15 @@ export function PageHead({ title, sub, crumb, children }: { title: string; sub?:
 
 export function Dialog({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current; if (!d) return;
     if (open && !d.open) d.showModal();
     if (!open && d.open) d.close();
   }, [open]);
   return (
-    <dialog ref={ref} onClose={onClose} onClick={(e) => { if (e.target === ref.current) onClose(); }} aria-labelledby="dlg-title">
-      <div className="dlg-head"><h2 id="dlg-title">{title}</h2></div>
+    <dialog ref={ref} onClose={onClose} onClick={(e) => { if (e.target === ref.current) onClose(); }} aria-labelledby={titleId}>
+      <div className="dlg-head"><h2 id={titleId}>{title}</h2></div>
       <div className="dlg-body">{children}</div>
       {footer && <div className="dlg-foot">{footer}</div>}
     </dialog>

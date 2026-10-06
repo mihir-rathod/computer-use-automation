@@ -41,9 +41,11 @@ def _parameterize(value: str, parameters: dict[str, str]) -> str:
     """Replace any concrete parameter value that appears literally in `value` with its
     {{name}} placeholder -- e.g. "10001" -> "{{member_id}}". This is the whole mechanism that
     turns one concrete recorded run into a reusable, parameterized capability."""
-    for name, concrete in parameters.items():
-        if concrete and concrete in value:
-            value = value.replace(concrete, f"{{{{{name}}}}}")
+    # Longest value first, and only where the value stands alone: "20" must not be pulled out of "2026-03-04" or out of another input's value ("A-200021"
+    # is not "A-20002"). A blind replace once corrupted an email that happened to contain a member id (WRITEUP incident on the Meridian branch).
+    for name, concrete in sorted(parameters.items(), key=lambda kv: -len(kv[1] or "")):
+        if concrete:
+            value = re.sub(rf"(?<![A-Za-z0-9]){re.escape(concrete)}(?![A-Za-z0-9])", lambda _m, n=name: f"{{{{{n}}}}}", value)
     return value
 
 

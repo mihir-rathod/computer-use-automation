@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useApi, useAuth, useToast } from "@/lib/hooks";
 import { api, ApiError } from "@/lib/api";
@@ -9,7 +9,7 @@ import { ago, when } from "@/lib/format";
 import { Empty, ErrorState, PageHead, RiskBadge, Skeleton } from "@/components/ui";
 import { ReasonDialog } from "@/components/Panels";
 
-interface Versions { current: string; versions: string[]; history: { action: string; version: string; from: string | null; at: string; by: string; reason: string }[] }
+interface Versions { current: string | null; versions: string[]; history: { action: string; version: string; from: string | null; at: string; by: string; reason: string }[] }
 
 function DiffView({ d }: { d: ArtifactDiff }) {
   const none = !d.metadata.length && !d.schema.length && !d.safety.length && !d.error_handling.length && !d.steps.length;
@@ -25,12 +25,16 @@ function DiffView({ d }: { d: ArtifactDiff }) {
 }
 
 function Artifact() {
-  const id = useSearchParams().get("id") ?? "";
+  const search = useSearchParams();
+  const id = search.get("id") ?? "";
   const { me } = useAuth();
   const toast = useToast();
-  const [version, setVersion] = useState<string>("");
-  const cap = useApi<Capability>(id ? `/v1/capabilities/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}` : null);
+  const [version, setVersion] = useState<string>(search.get("version") ?? "");
   const vs = useApi<Versions>(id ? `/v1/artifacts/${encodeURIComponent(id)}/versions` : null);
+  const cap = useApi<Capability>(id && (version || vs.data?.current) ? `/v1/capabilities/${encodeURIComponent(id)}${version ? `?version=${version}` : ""}` : null);
+  // a draft (taught, never promoted) has no current version: show its latest instead of failing
+  const draftLatest = vs.data && vs.data.current === null ? vs.data.versions[vs.data.versions.length - 1] : "";
+  useEffect(() => { if (draftLatest && !version) setVersion(draftLatest); }, [draftLatest, version]);
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
   const diff = useApi<ArtifactDiff>(id && from && to && from !== to ? `/v1/artifacts/${encodeURIComponent(id)}/diff?from=${from}&to=${to}` : null);
   const [act, setAct] = useState<null | { kind: "promote" | "rollback"; v?: string }>(null);
@@ -50,8 +54,8 @@ function Artifact() {
     <div className="page">
       <PageHead title={c.name} crumb={<Link href="/artifacts/">← Artifacts</Link>} sub={<code>{c.capability_id}</code>}>
         <RiskBadge level={c.risk.level} commits={c.risk.has_irreversible_step} tier={c.risk.approval_required} />
-        <select aria-label="Version" value={version || v.current} onChange={(e) => setVersion(e.target.value === v.current ? "" : e.target.value)} style={{ width: "auto" }}>
-          {v.versions.map((x) => <option key={x} value={x}>v{x}{x === v.current ? " (current)" : ""}</option>)}</select>
+        <select aria-label="Version" value={version || v.current || ""} onChange={(e) => setVersion(e.target.value === v.current ? "" : e.target.value)} style={{ width: "auto" }}>
+          {v.versions.map((x) => <option key={x} value={x}>v{x}{x === v.current ? " (current)" : v.current === null ? " (draft)" : ""}</option>)}</select>
       </PageHead>
       <div className="split">
         <section className="card"><div className="card-head"><h2>Steps</h2><span className="small muted">v{c.version}</span></div>

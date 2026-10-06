@@ -42,7 +42,7 @@ from replay.result import ReplayStatus
 from runs.approvals import decide_run, resolve_run
 from runs.executor import RunExecutor
 from runs.store import ApprovalError, NotPermitted, RunError
-from safety.config import ROLE_RANK, irreversible_step_ids, role_allows
+from safety.config import ROLE_RANK, irreversible_step_ids, required_approval, role_allows
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 _executor: RunExecutor | None = None
@@ -373,7 +373,8 @@ def capability_view(artifact: Any, detail: bool = False) -> dict[str, Any]:
 
 @router.get("/capabilities")
 def capabilities(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
-    return {"capabilities": [capability_view(a) for a in storage.list_artifacts(adir())]}
+    hidden = runtime.hidden_apps()
+    return {"capabilities": [capability_view(a) for a in storage.list_artifacts(adir()) if a.target.app_id not in hidden]}
 
 
 @router.get("/capabilities/{capability_id}")
@@ -387,7 +388,7 @@ def capability(capability_id: str, version: str | None = None, _: Principal = De
 @router.get("/targets")
 def targets(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
     return {"targets": [{"name": n, "app": p.get("app_id"), "base_url": p["base_url"], "sandbox": bool(p.get("sandbox")),
-                         "signs_in_as": p["username"]} for n, p in runtime.TARGET_PROFILES.items()]}
+                         "signs_in_as": p["username"]} for n, p in runtime.TARGET_PROFILES.items() if not p.get("hidden")]}
 
 
 @router.get("/me")
@@ -415,7 +416,8 @@ def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
     p = runtime.default_policy()
     return {
         "approvers": p.approvers,
-        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
+        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items() if k.split(".")[0] not in runtime.hidden_apps()},
+        "default_approval": p.default_approval, "teaching": p.teaching.model_dump(),
         "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
         "risk_keywords": p.risk_keywords.model_dump(),
         "redaction": {"patterns": sorted(p.redaction.patterns), "field_names": p.redaction.field_names},
@@ -491,8 +493,11 @@ def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
                          "new_locators": [{"strategy": l.strategy.value, "value": l.value} for l in (p.new_target.locators if p.new_target else [])],
                          "candidates": [c.model_dump() for c in p.candidates[:4]], "has_screenshot": bool(p.screenshot), "page_url": p.page_url,
                          "description": p.old_target.semantic_description})
-    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_,
-            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "total": len(approvals_) + len(reviews) + len(repairs_)}}
+    teach_commits = [{"id": t["id"], "capability_id": t["capability_id"], "created_by": t["created_by"], "request": json.loads(t["commit_request_json"]) if t["commit_request_json"] else None}
+                     for t in store.teach_active() if t["status"] == "awaiting_commit"]
+    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "teach_commits": teach_commits,
+            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "teach_commits": len(teach_commits),
+                       "total": len(approvals_) + len(reviews) + len(repairs_) + len(teach_commits)}}
 
 
 # ---- repairs ---------------------------------------------------------------------------------------------------------
@@ -563,8 +568,13 @@ def diff(capability_id: str, a: str = Query(alias="from"), b: str = Query(alias=
         raise HTTPException(404, str(exc)) from None
 
 
-def _promoter_ok(who: Principal, capability_id: str) -> None:
-    tier = runtime.default_policy().for_capability(capability_id).approval
+def _promoter_ok(who: Principal, capability_id: str, version: str | None = None) -> None:
+    """Changing what runs for a capability that commits something needs the tier its runs need; one that only reads needs an operator."""
+    policy = runtime.default_policy()
+    try:
+        tier = required_approval(policy, storage.load_artifact_by_id(capability_id, adir(), version=version)) or "live"
+    except (FileNotFoundError, storage.UnknownVersion):
+        tier = "live"  # the caller reports the missing capability or version right after
     ok, why = role_allows(who.role, "operator" if tier == "live" else tier)
     if not ok:
         raise HTTPException(403, why)
@@ -572,7 +582,7 @@ def _promoter_ok(who: Principal, capability_id: str) -> None:
 
 @router.post("/artifacts/{capability_id}/promote/{version}")
 def promote(capability_id: str, version: str, body: Decision, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
-    _promoter_ok(who, capability_id)
+    _promoter_ok(who, capability_id, version)
     try:
         findings = lint_artifact(storage.load_artifact_by_id(capability_id, adir(), version=version))
         if has_errors(findings):

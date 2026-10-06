@@ -1,0 +1,14 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>Appointment {{ appt.number }}</h3>
+<table class="data">
+<tr><th scope="row">Patient</th><td>{{ appt.patient.last_name }}, {{ appt.patient.first_name }} ({{ appt.patient.mrn }})</td></tr>
+<tr><th scope="row">Appointment</th><td>{{ appt.number }} - {{ appt.starts_at|fmt_dt }}</td></tr>
+<tr><th scope="row">Provider</th><td>{{ appt.provider }}</td></tr>
+<tr><th scope="row">Reason</th><td>{{ appt.reason }}</td></tr>
+<tr><th scope="row">Status</th><td>{{ appt.status }}</td></tr>
+</table>
+<p>{% if appt.can_modify %}<a href="/legacy/appointments/{{ appt.number }}/reschedule">Reschedule this appointment</a> &nbsp;
+<a href="/legacy/appointments/{{ appt.number }}/cancel">Cancel this appointment</a> &nbsp;{% endif %}
+<a href="/legacy/schedule?date={{ appt.starts_at[:10] }}">See that day's schedule</a></p>
+{% endblock %}

@@ -13,15 +13,18 @@ an escalation/pause path needs -- this is where that context originates.
 """
 from __future__ import annotations
 
+import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import urlsplit
 
 from google.genai import types
 
 from agent.commit_gate import CommitDecision, CommitGate, describe_request
 from agent.gemini_client import GeminiClient
-from agent.tools import ALL_TOOLS, ToolCall, is_terminal, to_action
+from agent.tools import ALL_TOOLS, CLICK_ONLY_TOOLS, ToolCall, is_terminal, to_action
 from artifacts_lib.schema import ActionType
 from escalation.session_manager import SessionCancelled, SessionManager
 from evidence_lib.logger import EvidenceLogger
@@ -31,11 +34,13 @@ from surface.base import Action, ActionResult, ObservedState, Surface
 DEFAULT_MAX_STEPS = 25
 DEFAULT_TIMEOUT_SECONDS = 300
 DEAD_END_THRESHOLD = 3
+REVISIT_NUDGE_AFTER = 3  # visits to one page before the model is told it is going round in circles
+_UNREACHABLE = re.compile(r"net::ERR_(CONNECTION_REFUSED|CONNECTION_RESET|CONNECTION_CLOSED|EMPTY_RESPONSE|NAME_NOT_RESOLVED|ADDRESS_UNREACHABLE|TIMED_OUT)")
 
-StopReason = Literal["finished", "give_up", "max_steps", "timeout", "dead_end", "error"]
+StopReason = Literal["finished", "give_up", "max_steps", "timeout", "dead_end", "error", "cancelled"]
 # Stop reasons that mean "the model is stuck," not "the model is done" -- these are what
 # escalate to a human rather than just ending the run.
-_STUCK_REASONS = {"give_up", "dead_end", "max_steps", "timeout"}
+_STUCK_REASONS = {"give_up", "dead_end", "max_steps", "timeout"}  # ("cancelled" is a decision, not being stuck)
 
 SYSTEM_INSTRUCTION = (
     "You are an automation agent operating a web application through a structured element "
@@ -44,7 +49,11 @@ SYSTEM_INSTRUCTION = (
     "exactly one tool per turn to make progress toward the stated goal -- prefer the most "
     "direct path. Use extract() to record any piece of data the goal asks you to read. Call "
     "finish() only once the goal is genuinely and visibly achieved. Call give_up() if you are "
-    "stuck: no element matches what you need, or recent actions haven't changed anything."
+    "stuck: no element matches what you need, or recent actions haven't changed anything. "
+    "Move around by clicking the links and buttons in the element list; never guess a URL. If no link is named exactly for what you need, "
+    "open the closest-sounding one and look: function names are often not what the request calls them. "
+    "Use the parameter values exactly as given. If the record they refer to cannot be found, call give_up and say it was not found: "
+    "never read a different record instead, and never find the answer by browsing a list when a lookup by that value exists."
 )
 
 
@@ -77,11 +86,15 @@ class DiscoveryLoop:
         session_manager: SessionManager | None = None,
         commit_gate: CommitGate | None = None,
         capability_id: str | None = None,
+        should_stop: Callable[[], bool] | None = None,
+        allow_navigate: bool = True,
     ):
         self.surface = surface
         # Asked, instead of failing the step, when the safety policy blocks an irreversible action. No gate
         # means the old behaviour: the block is reported back to the model and discovery cannot commit.
         self.commit_gate = commit_gate
+        self.should_stop = should_stop  # polled each turn so a person can cancel a teaching session
+        self.tools = ALL_TOOLS if allow_navigate else CLICK_ONLY_TOOLS
         self.capability_id = capability_id
         self.gemini_client = gemini_client
         self.evidence_logger = evidence_logger
@@ -106,6 +119,7 @@ class DiscoveryLoop:
         started = time.monotonic()
         transcript: list[RecordedAction] = []
         recent_calls: list[str] = []
+        visits: dict[str, int] = {}
         contents: list[types.Content] = [
             types.Content(role="user", parts=[types.Part.from_text(text=self._initial_prompt(goal, parameters, output_names))])
         ]
@@ -119,6 +133,8 @@ class DiscoveryLoop:
                 return self._finish(transcript, "error", f"could not navigate to start_path {start_path!r}: {start_result.error}")
 
         for step_index in range(self.max_steps):
+            if self.should_stop is not None and self.should_stop():
+                return self._finish(transcript, "cancelled", "stopped by a person")
             if time.monotonic() - started > self.timeout_seconds:
                 return self._finish(transcript, "timeout", None)
 
@@ -126,9 +142,15 @@ class DiscoveryLoop:
             if transcript and transcript[-1].observed_after is None:
                 transcript[-1].observed_after = observed
 
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=observed.to_prompt_text())]))
+            page = urlsplit(observed.url).path
+            visits[page] = visits.get(page, 0) + 1
+            prompt = observed.to_prompt_text()
+            if visits[page] >= REVISIT_NUDGE_AFTER and len(transcript) >= visits[page]:
+                prompt += (f"\n\nNote: you have been on this page {visits[page]} times and have not finished. Going round again will not help: "
+                           "pick a link or button you have not tried yet, or call give_up and say what is missing.")
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=prompt)]))
 
-            response = self.gemini_client.generate(contents, tools=ALL_TOOLS, system_instruction=SYSTEM_INSTRUCTION)
+            response = self.gemini_client.generate(contents, tools=self.tools, system_instruction=SYSTEM_INSTRUCTION)
             model_content = response.candidates[0].content
             contents.append(model_content)
 
@@ -157,12 +179,18 @@ class DiscoveryLoop:
             action = to_action(tool_call)
             action.actor = "agent"
             result = self.surface.act(action)
+            if result.error and _UNREACHABLE.search(result.error):
+                # the system went away (a restart, a crash): everything after this would be the model guessing at an error page
+                transcript.append(RecordedAction(action=action, result=result, observed_before=observed))
+                return self._finish(transcript, "error", "the system could not be reached while the model was working (it may have restarted). Nothing was recorded; try again")
             if result.applied_params:
                 action.params.update(result.applied_params)  # record what was really applied, so the recorder parameterizes the real value
             approval: CommitDecision | None = None
             if result.blocked == "irreversible_unconfirmed" and self.commit_gate is not None:
                 request = describe_request(action, observed, self.capability_id, goal)
+                waited_from = time.monotonic()
                 decision = self.commit_gate(request)
+                started += time.monotonic() - waited_from  # time spent waiting for a person's approval does not count against the model's budget
                 if self.evidence_logger is not None:
                     self.evidence_logger.log("human" if decision.mode == "supervised" else "system", "commit_decision",
                                              approved=decision.approved, approver=decision.approver, mode=decision.mode,

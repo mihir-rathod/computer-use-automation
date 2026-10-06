@@ -3,6 +3,7 @@ returned straight from a POST (so a browser refresh resubmits). It is deliberate
 real back-office screens are; the business rules all live in `clinic.services`."""
 from __future__ import annotations
 
+from datetime import date as _date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters.update(money=money, fmt_date=fmt_date, fmt_dt=fmt_dt, fmt_time=fmt_time)
 
 FUNCTIONS = {
+    "find": ("Find appointment", "Appointment no."),
     "cancel": ("Cancel appointment", "Appointment no."),
     "reschedule": ("Reschedule appointment", "Appointment no."),
     "claim": ("Submit insurance claim", "Invoice no."),
@@ -211,13 +213,21 @@ async def schedule(request: Request, actor: Actor = Depends(legacy_actor)) -> HT
         rows = world.clinic.schedule(actor, day, provider)
     except ValidationFailed as exc:
         problems = exc.problems
+    prev_day = next_day = None
+    try:
+        parsed = _date.fromisoformat(day.strip())
+        prev_day, next_day = (parsed - timedelta(days=1)).isoformat(), (parsed + timedelta(days=1)).isoformat()
+    except ValueError:
+        pass
     return render(request, "schedule.html", actor, date=day, provider=provider, providers=world.clinic.providers(),
-                  rows=rows, problems=problems)
+                  rows=rows, problems=problems, prev_day=prev_day, next_day=next_day)
 
 
 # ---- transactions ----------------------------------------------------------------------
 
 def _detail_url(kind: str, number: str) -> str:
+    if kind == "find":
+        return f"/legacy/appointments/{number}"
     return f"/legacy/appointments/{number}/{kind}" if kind in ("cancel", "reschedule") else f"/legacy/invoices/{number}/{kind}"
 
 
@@ -237,7 +247,7 @@ async def function_entry_submit(kind: str, request: Request, actor: Actor = Depe
     title, prompt = FUNCTIONS[kind]
     number = ui.read(await request.form(), "number").strip().upper()
     try:
-        (world.clinic.appointment_info if kind in ("cancel", "reschedule") else world.clinic.invoice_info)(number)
+        (world.clinic.appointment_info if kind in ("find", "cancel", "reschedule") else world.clinic.invoice_info)(number)
     except NotFound:
         return render(request, "fn_entry.html", actor, kind=kind, title=title, prompt=prompt, error="RECORD NOT FOUND")
     return RedirectResponse(_detail_url(kind, number), status_code=303)
@@ -265,6 +275,16 @@ def _txn_form(request: Request, actor: Actor, kind: str, number: str, form: dict
         return fail(request, actor, exc)
     return render(request, "txn_form.html", actor, kind=kind, number=number, title=title, summary=summary,
                   reasons=REASONS.get(kind), form=form, problems=problems)
+
+
+@router.get("/appointments/{number}", response_class=HTMLResponse)
+async def appointment_view(number: str, request: Request, actor: Actor = Depends(legacy_actor)) -> HTMLResponse:
+    """Read-only: who, when, with whom. Changing it is a separate step on its own page."""
+    try:
+        appt = world_of(request).clinic.appointment_info(number.strip().upper())
+    except ClinicError as exc:
+        return fail(request, actor, exc)
+    return render(request, "appointment.html", actor, appt=appt)
 
 
 @router.get("/appointments/{number}/cancel", response_class=HTMLResponse)

@@ -29,6 +29,7 @@ class Console:
 @pytest.fixture
 def console(api_base_url, clinic_base_url, tmp_path, monkeypatch):
     monkeypatch.setenv("ARTIFACTS_DIR", str(copy_artifacts(tmp_path)))
+    monkeypatch.setattr(runtime, "EVIDENCE_ROOT", tmp_path / "evidence")  # runs and teaching sessions started from the console must not leave evidence in the repo
     monkeypatch.setitem(runtime.TARGET_PROFILES["clinic"], "base_url", clinic_base_url)
     monkeypatch.setitem(runtime.TARGET_PROFILES["clinic_supervisor"], "base_url", clinic_base_url)
     reset(clinic_base_url)

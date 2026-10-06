@@ -90,6 +90,29 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TEXT,
     revoked_at TEXT
 );
+CREATE TABLE IF NOT EXISTS teach_sessions (
+    id TEXT PRIMARY KEY,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    capability_id TEXT NOT NULL,
+    version TEXT,
+    target TEXT NOT NULL,
+    contract_json TEXT NOT NULL,
+    evidence_dir TEXT,
+    stop_reason TEXT,
+    reasoning TEXT,
+    steps INTEGER,
+    error TEXT,
+    verify_json TEXT,
+    lint_json TEXT,
+    commit_request_json TEXT,
+    commit_decision TEXT,
+    commit_decided_by TEXT,
+    commit_reason TEXT,
+    retry_of TEXT
+);
 CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner TEXT NOT NULL,
@@ -299,6 +322,48 @@ class RunStore:
             db.execute("INSERT INTO approvals(run_id,tier,requested_by,requested_at,decision,decided_by,decided_at,reason) VALUES(?,?,?,?,?,?,?,?)",
                        (run_id, "resolution", by, _now(), outcome, by, _now(), reason))
         return self.get(run_id)  # type: ignore[return-value]
+
+    # ---- teaching sessions --------------------------------------------------------------------------------
+
+    def teach_create(self, created_by: str, capability_id: str, target: str, contract_json: str, retry_of: str | None = None) -> dict[str, Any]:
+        sid = "teach_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "_" + secrets.token_hex(3)
+        with self._tx() as db:
+            db.execute("INSERT INTO teach_sessions(id, created_by, created_at, status, capability_id, target, contract_json, retry_of) VALUES(?,?,?,?,?,?,?,?)",
+                       (sid, created_by, _now(), "queued", capability_id, target, contract_json, retry_of))
+        return self.teach_get(sid)  # type: ignore[return-value]
+
+    def teach_get(self, sid: str) -> dict[str, Any] | None:
+        return self._row("SELECT * FROM teach_sessions WHERE id=?", (sid,))
+
+    def teach_list(self, created_by: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if created_by:
+            return self._rows("SELECT * FROM teach_sessions WHERE created_by=? ORDER BY created_at DESC, rowid DESC LIMIT ?", (created_by, limit))
+        return self._rows("SELECT * FROM teach_sessions ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,))
+
+    def teach_update(self, sid: str, **fields: Any) -> None:
+        allowed = {"status", "version", "evidence_dir", "stop_reason", "reasoning", "steps", "error", "verify_json", "lint_json", "finished_at",
+                   "commit_request_json", "commit_decision", "commit_decided_by", "commit_reason"}
+        bad = set(fields) - allowed
+        if bad:
+            raise RunError(f"cannot set {sorted(bad)}")
+        with self._tx() as db:
+            db.execute(f"UPDATE teach_sessions SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), sid))
+
+    def teach_active(self) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM teach_sessions WHERE status IN ('queued','running','awaiting_commit','verifying')")
+
+    def teach_decide_commit(self, sid: str, decision: str, by: str, reason: str) -> dict[str, Any]:
+        """Records a supervisor's answer to a teaching session's request to take its one irreversible step. Atomic: only the first answer counts."""
+        if not reason.strip():
+            raise ApprovalError("a decision needs a reason")
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM teach_sessions WHERE id=?", (sid,)).fetchone()
+            if row is None:
+                raise ApprovalError(f"unknown teaching session {sid}")
+            if row["status"] != "awaiting_commit" or row["commit_decision"] is not None:
+                raise ApprovalError(f"session {sid} is not waiting for a commit decision (status={row['status']})")
+            db.execute("UPDATE teach_sessions SET commit_decision=?, commit_decided_by=?, commit_reason=? WHERE id=?", (decision, by, reason, sid))
+        return self.teach_get(sid)  # type: ignore[return-value]
 
     # ---- chat ---------------------------------------------------------------------------------------------
 

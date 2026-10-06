@@ -47,7 +47,7 @@ def ref(prompt: str, pattern: str) -> str:
 
 def refund_script(invoice: str, amount: str, reason: str):
     return [
-        ("type_text", lambda p: {"ref": ref(p, r'textbox.*name="number"'), "text": invoice}),
+        ("type_text", lambda p: {"ref": ref(p, r'textbox.*(name="number"|no\.")'), "text": invoice}),
         ("click", lambda p: {"ref": ref(p, r'button "Continue"')}),
         ("type_text", lambda p: {"ref": ref(p, r'textbox.*name="amount"'), "text": amount}),
         ("select_option", lambda p: {"ref": ref(p, r"combobox.*name=\"reason\""), "value": reason}),

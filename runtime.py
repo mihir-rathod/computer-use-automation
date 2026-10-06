@@ -19,6 +19,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import uvicorn
 from playwright.sync_api import sync_playwright
@@ -71,8 +72,11 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "allowlist": DEFAULT_ALLOWLIST_PATH,
         "login_capability": "mockbank.login",
         "login_path": "/login",
+        "home_path": "/search",
         "sandbox": True,
         "app_id": "mockbank",
+        # The original sample target, kept for the CLI, the tests and MCP. The console does not offer it: the clinic is the target this project ships.
+        "hidden": True,
     },
     # Larkspur Clinic Ops (the legacy skin). Sandbox: a seeded demo clinic whose data resets on demand.
     "clinic": {
@@ -82,6 +86,7 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "allowlist": ALLOWLIST_DIR / "allowlist_clinic.json",
         "login_capability": "clinic.login",
         "login_path": "/legacy/login",
+        "home_path": "/legacy/menu",
         "sandbox": True,
         "app_id": "clinic",
     },
@@ -93,10 +98,19 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "allowlist": ALLOWLIST_DIR / "allowlist_clinic.json",
         "login_capability": "clinic.login",
         "login_path": "/legacy/login",
+        "home_path": "/legacy/menu",
         "sandbox": True,
         "app_id": "clinic",
     },
 }
+
+
+def hidden_apps() -> set[str]:
+    """Apps the console leaves out: every profile for the app is marked hidden. They still work from the CLI, the API by name and MCP."""
+    apps: dict[str, bool] = {}
+    for profile in TARGET_PROFILES.values():
+        apps[profile["app_id"]] = apps.get(profile["app_id"], True) and bool(profile.get("hidden"))
+    return {app for app, hidden in apps.items() if hidden}
 
 
 def resolve_target(
@@ -351,8 +365,7 @@ def prepare_run(
             # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
             # stays "running" for ever and its idempotency key is blocked. Close it as a failure and report it as one.
             observability.log("run.runner_error", logging.ERROR, error_type=type(exc).__name__)
-            result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=ReplayError(
-                code="runner_error", message=f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else exc}"))
+            result = _early_result(artifact, ReplayStatus.HARD_FAILURE, run_id_, error=_explain_runner_error(exc, target, base_url))
         result.run_id, result.approval_tier = run_id_, tier
         store.finish(run_id_, result, str(evidence_dir))
         evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -370,6 +383,28 @@ def prepare_run(
             return _body(cancel_event_)
 
     return Prepared(run_id_, evidence_dir, execute)
+
+
+_UNREACHABLE = ("ERR_CONNECTION_REFUSED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_TIMED_OUT", "ERR_ADDRESS_UNREACHABLE", "ERR_CONNECTION_RESET", "ERR_INTERNET_DISCONNECTED")
+
+
+def _on_sign_in_page(page: Any, profile: dict[str, Any]) -> bool:
+    try:
+        return urlsplit(page.url).path.rstrip("/") == str(profile["login_path"]).rstrip("/")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _explain_runner_error(exc: Exception, target: str | None, base_url: str | None) -> ReplayError:
+    """A person reading a failed run needs "the system isn't reachable", not a Playwright stack line."""
+    text = str(exc)
+    if any(marker in text for marker in _UNREACHABLE):
+        try:
+            where = resolve_target(target or "mockbank", base_url)["base_url"]
+        except Exception:  # noqa: BLE001
+            where = base_url or "the target system"
+        return ReplayError(code="target_unreachable", message=f"Couldn't reach {where}. The system may not be running, or its address may be wrong. Nothing was changed; try again once it is up.")
+    return ReplayError(code="runner_error", message=f"{type(exc).__name__}: {text.splitlines()[0] if text else exc}")
 
 
 def _repair_hook(store: RunStore, run_id_: str, use_llm: bool):
@@ -491,7 +526,15 @@ def _replay_in_browser(
                 deadline_s=deadline_s, cancel_event=cancel_event, dry_run=dry_run, confirmed_steps=confirmed_steps,
             )
             result = engine.run(artifact, params)
-            if repair_hook is not None and result.status == ReplayStatus.HARD_FAILURE and result.error and result.error.code == "locator_unresolved":
+            if (result.status == ReplayStatus.HARD_FAILURE and result.error and result.error.code in ("locator_unresolved", "checkpoint_failed", "action_failed")
+                    and artifact.capability_id != profile["login_capability"] and _on_sign_in_page(page, profile)):
+                # (a lost session shows up as whichever check trips first: the element missing, or the page not being where it should be)
+                # The system sent the run back to its sign-in screen: the session was lost (a restart, a timeout). That is not a screen change, so
+                # proposing a "repair" against the sign-in page would only put noise in the inbox. Say what happened and let it be retried.
+                result.error = ReplayError(step_id=result.error.step_id, code="session_lost", message=(
+                    "The system showed its sign-in page in the middle of the run, so the session was lost (it may have restarted or timed out). "
+                    "Nothing was changed and nothing needs repairing; try again."))
+            elif result.status == ReplayStatus.HARD_FAILURE and result.error and result.error.code == "locator_unresolved" and repair_hook is not None:
                 # Looks at the page the step failed on, while it is still open. A proposal only; nothing is applied.
                 result.repair_proposal_id = repair_hook(artifact, result.error.step_id, surface)
             return result

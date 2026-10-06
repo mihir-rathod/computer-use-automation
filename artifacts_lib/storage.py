@@ -85,6 +85,8 @@ def current_version(capability_id: str, directory: Path = DEFAULT_ARTIFACTS_DIR)
     if not capability_dir(capability_id, directory).is_dir():
         return versions[0]
     current = _read_index(capability_id, directory)["current"]
+    if current is None:
+        return None  # a draft: versions exist but none has been promoted, so nothing is runnable yet
     return current if current in versions else versions[-1]
 
 
@@ -126,6 +128,22 @@ def save_artifact(
     return path
 
 
+def delete_unpublished_version(capability_id: str, version: str, directory: Path = DEFAULT_ARTIFACTS_DIR) -> None:
+    """Removes a version that was never promoted (a draft or an unreviewed candidate). A version that ever was current stays: history is kept."""
+    folder = capability_dir(capability_id, directory)
+    path = folder / f"{version}.json"
+    if not path.exists():
+        return
+    index = _read_index(capability_id, directory)
+    if index["current"] == version or any(h["version"] == version for h in index["history"]):
+        raise ValueError(f"{capability_id} {version} has been published at some point and cannot be deleted")
+    path.unlink()
+    if not any(p for p in folder.glob("*.json") if p.name != INDEX_NAME):
+        for leftover in folder.iterdir():
+            leftover.unlink()
+        folder.rmdir()
+
+
 def _promote(capability_id: str, version: str, directory: Path, index: dict[str, Any], by: str, reason: str, action: str) -> None:
     index["history"].append({
         "action": action, "version": version, "from": index["current"],
@@ -163,7 +181,7 @@ def load_artifact_by_id(capability_id: str, directory: Path = DEFAULT_ARTIFACTS_
         chosen = version or current_version(capability_id, directory)
         path = folder / f"{chosen}.json"
         if chosen is None or not path.exists():
-            raise UnknownVersion(f"{capability_id} has no version {version or '(current)'}")
+            raise UnknownVersion(f"{capability_id} has no {'version ' + version if version else 'published version yet (it is a draft)'}")
         return load_artifact(path)
     artifact = load_artifact(_flat_path(capability_id, directory))
     if version is not None and artifact.version != version:
@@ -179,9 +197,14 @@ def capability_ids(directory: Path = DEFAULT_ARTIFACTS_DIR) -> list[str]:
     return sorted(ids)
 
 
+def list_drafts(directory: Path = DEFAULT_ARTIFACTS_DIR) -> list[str]:
+    """Capabilities that have versions but no promoted one: taught, awaiting review. They are not runnable and not in the catalog."""
+    return [cid for cid in capability_ids(directory) if current_version(cid, directory) is None]
+
+
 def list_artifacts(directory: Path = DEFAULT_ARTIFACTS_DIR) -> list[Artifact]:
-    """The current version of every capability."""
-    return [load_artifact_by_id(cid, directory) for cid in capability_ids(directory)]
+    """The current version of every published capability (drafts are left out)."""
+    return [load_artifact_by_id(cid, directory) for cid in capability_ids(directory) if current_version(cid, directory) is not None]
 
 
 def migrate_flat(directory: Path = DEFAULT_ARTIFACTS_DIR) -> list[str]:

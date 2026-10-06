@@ -133,3 +133,24 @@ def test_drift_levels_change_what_an_automation_sees_but_the_app_keeps_working(a
     assert r.status_code == 303
     menu = c.get("/legacy/menu").text
     assert "Patient lookup" not in menu and "Patients" in menu
+
+
+def test_find_appointment_is_a_read_only_lookup_by_number(app):
+    c = login(app)
+    appt = app.state.world.fixtures["standard"]["upcoming_appointment"]
+    assert "Find appointment" in c.get("/legacy/menu").text
+    assert c.post("/legacy/fn/find", data={"number": appt.lower()}).headers["location"] == f"/legacy/appointments/{appt}"
+    page = c.get(f"/legacy/appointments/{appt}").text
+    assert appt in page and "Provider" in page and "Patient" in page and "Brennan, Avery" in page
+    assert f"/legacy/appointments/{appt}/cancel" in page  # a way to the change, as a separate step, never done from here
+    assert "RECORD NOT FOUND" in c.post("/legacy/fn/find", data={"number": appt + "0"}).text  # one digit too many
+    assert len(app.state.world.audit.list(action="appointment.cancel", effects_only=True)) == 0
+
+
+def test_the_schedule_has_labels_a_date_picker_and_neighbouring_days(app):
+    html = login(app).get("/legacy/schedule?date=2026-03-04").text
+    assert 'type="date"' in html and 'for="sched-date"' in html and 'for="sched-provider"' in html
+    assert "date=2026-03-03" in html and "date=2026-03-05" in html and "Previous day" in html and "Next day" in html
+    assert '<th scope="col">Appt no.</th>' in html and "<caption>" in html
+    assert "A-20002" in html and 'href="/legacy/appointments/A-20002"' in html
+    assert "Date must be in YYYY-MM-DD format." in login(app).get("/legacy/schedule?date=banana").text  # the server still checks it
