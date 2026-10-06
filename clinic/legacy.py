@@ -33,6 +33,7 @@ templates.env.filters.update(money=money, fmt_date=fmt_date, fmt_dt=fmt_dt, fmt_
 
 FUNCTIONS = {
     "find": ("Find appointment", "Appointment no."),
+    "invoice": ("Find invoice", "Invoice no."),
     "cancel": ("Cancel appointment", "Appointment no."),
     "reschedule": ("Reschedule appointment", "Appointment no."),
     "claim": ("Submit insurance claim", "Invoice no."),
@@ -228,6 +229,8 @@ async def schedule(request: Request, actor: Actor = Depends(legacy_actor)) -> HT
 def _detail_url(kind: str, number: str) -> str:
     if kind == "find":
         return f"/legacy/appointments/{number}"
+    if kind == "invoice":
+        return f"/legacy/invoices/{number}"
     return f"/legacy/appointments/{number}/{kind}" if kind in ("cancel", "reschedule") else f"/legacy/invoices/{number}/{kind}"
 
 
@@ -290,6 +293,16 @@ async def appointment_view(number: str, request: Request, actor: Actor = Depends
 @router.get("/appointments/{number}/cancel", response_class=HTMLResponse)
 async def cancel_form(number: str, request: Request, actor: Actor = Depends(legacy_actor)) -> HTMLResponse:
     return _txn_form(request, actor, "cancel", number, {}, [])
+
+
+@router.get("/invoices/{number}", response_class=HTMLResponse)
+async def invoice_view(number: str, request: Request, actor: Actor = Depends(legacy_actor)) -> HTMLResponse:
+    """Read-only: what the invoice is for and what is owed. Refunds, claims and write-offs are separate functions."""
+    try:
+        invoice = world_of(request).clinic.invoice_info(number.strip().upper())
+    except ClinicError as exc:
+        return fail(request, actor, exc)
+    return render(request, "invoice.html", actor, invoice=invoice)
 
 
 @router.get("/invoices/{number}/{kind}", response_class=HTMLResponse)

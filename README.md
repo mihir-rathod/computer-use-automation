@@ -102,13 +102,13 @@ sandbox keeps a Playwright trace: `uv run playwright show-trace evidence/<run>/t
 
 ```bash
 uv run python cli.py runs pending
-uv run python cli.py approve RUN_ID --by dana.okafor --reason "checked the invoice"
+uv run python cli.py approve RUN_ID --by suzie.visor --reason "checked the invoice"
 uv run python cli.py replay --target clinic --capability clinic.issue_refund --resume RUN_ID
 uv run python cli.py repair list --status pending                  # then: repair show / repair approve REPAIR_ID
 uv run python cli.py canary run --target clinic                    # known-good read-only replays, to catch drift early
 ```
 
-Approver names come from the roster in `safety/policy.yaml`. `docker compose up --build` runs everything in one container; set `CLINIC_TEST_TOKEN` on anything that is not purely local.
+Approver names come from the roster in `safety/policy.yaml`. `docker compose up --build` runs the clinic target (both skins) in a container; set `CLINIC_TEST_TOKEN` on any deployment that is not purely local.
 
 ## How it works
 
@@ -159,13 +159,19 @@ uv run python cli.py metrics --hours 24
 uv run pytest
 ```
 
-430 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
+434 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
 chat, escalation) and skip without `GEMINI_API_KEY`. The modern-skin browser tests skip until `clinic/modern` is built (`cd clinic/modern && npm install && npm run build`).
 
 ## Results and roadmap
 
-- **Deterministic replay:** a retried commit posts exactly once, verified against the target's own audit log with the target's duplicate guard switched off.
-- **Drift recovery:** replays recovered 7 of 7 tasks at each of three UI-drift levels (changed ids and classes, then labels, then form field names) through human-approved repair proposals
-  (`scripts/drift_report.py`).
-- **Discovery:** from one sentence, the model drafts a task, works it out in about 20 seconds on a practice system, and the recording gave the right answers for 14 other records in each of 3 live runs.
-- **Roadmap:** a benchmark of success and recovery rates, CI, a hosted demo, and discovering a task on the clinic's React skin.
+Measured with `uv run python scripts/benchmark.py all --trials 3` against the bundled clinic (about 25 minutes; discovery needs `GEMINI_API_KEY`). Small samples on one target, so read them as
+"how this system behaved here", not as a promise for someone else's software.
+
+- **Faults:** 159 replays under injected faults (slow pages, a transient 500, a lost session, a maintenance page, errors and a lost session around a commit): every one ended as it should,
+  either carrying on or stopping safely, and none double-posted or left the record disagreeing with the result. Checked against the clinic's audit log with its own duplicate guard off.
+- **UI drift:** with the page's ids, labels and field names changed, 14 of 14 task runs at the two levels that break replay recovered through human-approved repairs (4 to 5 proposals per task at
+  level 2, up to 11 at level 3). All 77 proposals were right, and every commit changed state exactly once.
+- **No model at replay:** 0 model calls across 180 replays; a replay takes about 1.8 s.
+- **Discovery:** from one sentence, 3 of 4 read-only tasks were recorded in every attempt (9 of 9) in about 11 s and about 13k tokens, 6 recorded steps on average, and each recording was then right on 10 other
+  records (90 of 90). The 4th (reading the first row of a table with no labels) is refused with a reason, because the recorder cannot yet describe such a cell so that it carries over to other records.
+- **Roadmap:** CI, a hosted demo of the clinic, and discovering a task on the clinic's React skin.

@@ -256,8 +256,8 @@ class WebSurface(Surface):
         except Exception:
             return None
         label = facts.get("label")
-        if not facts.get("dataValued") or not label or '"' in label:
-            return None
+        if not facts.get("dataValued") or not label or '"' in label or any(ch.isdigit() for ch in label) or len(label) > 40:
+            return None  # the cell beside it is more record data (an id, a time), not a label: anchoring to it would only work for this record
         xpath = f'(//*[self::td or self::th][normalize-space(.)="{label}"]/following-sibling::*[self::td or self::th][1])[1]'
         return Target(
             semantic_description=f"value cell beside the '{label}' label",

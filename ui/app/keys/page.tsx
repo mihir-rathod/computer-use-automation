@@ -26,7 +26,7 @@ export default function Keys() {
     <div className="page">
       <PageHead title="API keys" sub="A key is a person's or a program's identity. Its name is recorded on everything it submits or approves; its role is its ceiling. Only a hash is stored, so a lost key is replaced, not recovered." />
       <form onSubmit={create} className="card card-pad"><div className="row" style={{ alignItems: "flex-end" }}>
-        <div style={{ flex: "1 1 220px" }}><Field id="kn" label="Name" error={err} hint="Who or what will use it, e.g. dana.okafor or my-assistant"><input id="kn" type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} /></Field></div>
+        <div style={{ flex: "1 1 220px" }}><Field id="kn" label="Name" error={err} hint="Who or what will use it, e.g. suzie.visor or my-assistant"><input id="kn" type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} /></Field></div>
         <div style={{ width: 170 }}><Field id="kr" label="Role"><select id="kr" value={role} onChange={(e) => setRole(e.target.value as Role)}>{["viewer", "operator", "supervisor", "admin"].map((r) => <option key={r}>{r}</option>)}</select></Field></div>
         <button className="btn primary" disabled={!name.trim() || busy}>Create key</button></div></form>
       <section className="card">

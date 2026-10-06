@@ -35,7 +35,7 @@ REFUND = {"invoice": "INV-30001", "amount": "10.00", "reason": "billing_error"}
 
 def approved_refund():
     first, _ = runtime.run_replay("clinic.issue_refund", REFUND, target="clinic", requested_by="alex", enable_operator_console=False)
-    decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "dana.okafor", "ok")
+    decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "suzie.visor", "ok")
     return first
 
 
@@ -77,8 +77,8 @@ def test_settling_an_ambiguous_commit_needs_someone_on_the_roster():
     with pytest.raises(ApprovalError, match="not on the approver roster"):
         resolve_run(store, policy, run, "committed", "alex", "x")
     with pytest.raises(ApprovalError, match="needs a supervisor"):
-        resolve_run(store, policy, run, "committed", "sam.reyes", "x")  # refunds are a supervisor-tier capability
-    resolve_run(store, policy, run, "committed", "dana.okafor", "in the ledger")
+        resolve_run(store, policy, run, "committed", "smooth.operator", "x")  # refunds are a supervisor-tier capability
+    resolve_run(store, policy, run, "committed", "suzie.visor", "in the ledger")
 
 
 def test_a_settled_commit_is_reported_as_committed_on_a_retry(monkeypatch):
@@ -87,7 +87,7 @@ def test_a_settled_commit_is_reported_as_committed_on_a_retry(monkeypatch):
     run = store.begin("mockbank.member_balance_lookup", "2.0.0", {"member_id": "10001"}, "a", "k2").run["id"]
     now = datetime.now(UTC)
     store.finish(run, ReplayResult(status=ReplayStatus.NEEDS_REVIEW, capability_id="mockbank.member_balance_lookup", started_at=now, finished_at=now))
-    store.resolve(run, "committed", "dana.okafor", "checked")
+    store.resolve(run, "committed", "suzie.visor", "checked")
     res, _ = runtime.run_replay("mockbank.member_balance_lookup", {"member_id": "10001"}, idempotency_key="k2", enable_operator_console=False)
     assert res.deduplicated and res.committed
 
@@ -147,8 +147,8 @@ def test_a_capability_cannot_be_run_against_the_wrong_app(monkeypatch):
 def test_approval_error_grammar():
     from safety.config import may_approve
 
-    ok, why = may_approve(PolicyConfig.load(), "sam.reyes", "supervisor")
-    assert why == "'sam.reyes' is an operator; this capability needs a supervisor approval"
+    ok, why = may_approve(PolicyConfig.load(), "smooth.operator", "supervisor")
+    assert why == "'smooth.operator' is an operator; this capability needs a supervisor approval"
 
 
 def test_an_idempotency_key_cannot_be_reused_for_different_parameters():

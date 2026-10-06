@@ -1,0 +1,90 @@
+# Continuous integration: every time code is pushed, a fresh machine in the cloud builds the project from scratch and runs the tests.
+# If anything fails, the commit gets a red cross on GitHub; if everything passes, a green check. That is the whole idea.
+#
+# GitHub reads every file in .github/workflows/. A workflow is: WHEN it runs (on), and one or more JOBS, each a list of STEPS.
+name: CI
+
+# WHEN: on every push to dev or main, on every pull request into main, and on demand from the Actions tab ("Run workflow").
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# If you push twice quickly, stop the older run: only the newest commit matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # WHERE: a brand-new Ubuntu virtual machine, thrown away afterwards. Nothing from your laptop is there, which is exactly the point:
+    # if it passes here, it does not secretly depend on something only you have installed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45   # a stuck run should fail, not burn minutes for hours
+
+    steps:
+      # 1. Get the code. (The machine starts empty.)
+      - uses: actions/checkout@v4
+
+      # 2. Python and our package manager. "uv" reads pyproject.toml and uv.lock, so the versions match yours exactly.
+      #    enable-cache keeps downloaded packages between runs, so later runs are faster.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # 3. Node, for building the two web apps. The npm cache is keyed on the lock files, so it is reused until a dependency changes.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            ui/package-lock.json
+            clinic/modern/package-lock.json
+
+      # 4. Install exactly what uv.lock says. --frozen means "fail if the lock file is out of date" instead of quietly changing it.
+      - run: uv sync --frozen
+
+      # 5. The browser the tests drive. --with-deps also installs the system libraries Chromium needs on a bare Linux machine.
+      - run: uv run playwright install --with-deps chromium
+
+      # 6. Build the console (also type-checks it). The browser tests for the console skip themselves if it is not built.
+      - name: Build the console
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # 7. Build the clinic's React skin, for the same reason.
+      - name: Build the clinic's React skin
+        working-directory: clinic/modern
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # 8. The tests. No GEMINI_API_KEY is set here, so the tests that call the real model skip themselves: CI never needs a secret
+      #    and never spends tokens. Everything else (about 420 tests, with a real browser) runs.
+      - name: Run the tests
+        run: uv run pytest -q -p no:cacheprovider
+
+  # The tests that call the real model. Run by hand from the Actions tab, never automatically, because they cost tokens and need a secret.
+  live:
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Run the model-backed tests
+        # A "secret" is stored in the repository settings (Settings > Secrets and variables > Actions); GitHub hides its value in logs.
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: uv run pytest -q -p no:cacheprovider tests/test_chat_live.py tests/test_console_discovery_live.py tests/test_discovery_live.py tests/test_escalation_live.py

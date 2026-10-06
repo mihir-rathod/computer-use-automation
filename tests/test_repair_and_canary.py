@@ -69,7 +69,7 @@ def heal_login(world, arts, tmp_path) -> RepairProposal:
     failed = replay(world, arts, tmp_path)
     assert failed.error.code == "login_failed" and failed.repair_proposal_id, failed.error
     proposal = proposal_of(failed)
-    approve_repair(runtime.default_store(), PolicyConfig.load(), proposal.id, "sam.reyes", "sign-on button was relabelled", arts)
+    approve_repair(runtime.default_store(), PolicyConfig.load(), proposal.id, "smooth.operator", "sign-on button was relabelled", arts)
     return proposal
 
 
@@ -117,12 +117,12 @@ def test_approved_repair_makes_a_new_version_that_replays_and_rolls_back(world, 
     heal_login(world, arts, tmp_path)
     failed = replay(world, arts, tmp_path)
 
-    done = approve_repair(store, policy, failed.repair_proposal_id, "sam.reyes", "button was renamed in the vendor release", arts)
+    done = approve_repair(store, policy, failed.repair_proposal_id, "smooth.operator", "button was renamed in the vendor release", arts)
 
     assert done["to"] == "1.0.1" and done["promoted"]
     repaired = storage.load_artifact_by_id("clinic.patient_lookup", arts)
     assert repaired.version == "1.0.1" and repaired.provenance.parent_version == "1.0.0"
-    assert repaired.provenance.approved_by == "sam.reyes" and repaired.provenance.repair_proposal_id == failed.repair_proposal_id
+    assert repaired.provenance.approved_by == "smooth.operator" and repaired.provenance.repair_proposal_id == failed.repair_proposal_id
     assert "renamed" in repaired.provenance.change_note
     changed = diff_artifacts(storage.load_artifact_by_id("clinic.patient_lookup", arts, "1.0.0"), repaired)
     assert [c.step for c in changed.steps] == [failed.error.step_id] and not changed.schema and not changed.safety  # one step, nothing else
@@ -132,7 +132,7 @@ def test_approved_repair_makes_a_new_version_that_replays_and_rolls_back(world, 
     assert result.status == ReplayStatus.HARD_FAILURE or result.status == ReplayStatus.SUCCESS
     assert result.error is None or result.error.step_id != failed.error.step_id
 
-    assert storage.rollback("clinic.patient_lookup", arts, by="sam.reyes", reason="back out") == "1.0.0"
+    assert storage.rollback("clinic.patient_lookup", arts, by="smooth.operator", reason="back out") == "1.0.0"
     assert replay(world, arts, tmp_path).error.step_id == failed.error.step_id  # the original breakage is back
     assert runtime.default_store().get_repair(failed.repair_proposal_id)["status"] == "approved"
 
@@ -146,10 +146,10 @@ def test_repair_approval_checks_roster_reason_and_state(world, arts, tmp_path):
     with pytest.raises(ApprovalError, match="not on the approver roster"):
         approve_repair(store, policy, pid, "mallory", "trust me", arts)
     with pytest.raises(ApprovalError, match="needs a reason"):
-        approve_repair(store, policy, pid, "sam.reyes", " ", arts)
-    reject_repair(store, pid, "sam.reyes", "wrong element")
+        approve_repair(store, policy, pid, "smooth.operator", " ", arts)
+    reject_repair(store, pid, "smooth.operator", "wrong element")
     with pytest.raises(ApprovalError, match="already rejected"):
-        approve_repair(store, policy, pid, "sam.reyes", "changed my mind", arts)
+        approve_repair(store, policy, pid, "smooth.operator", "changed my mind", arts)
     assert storage.list_versions("clinic.login", arts) == ["1.0.0"]
 
 
@@ -158,9 +158,9 @@ def test_a_stale_proposal_is_refused_when_the_artifact_has_moved_on(world, arts,
     policy, store = PolicyConfig.load(), runtime.default_store()
     first = replay(world, arts, tmp_path)
     second = replay(world, arts, tmp_path)  # a second proposal against the same version
-    approve_repair(store, policy, first.repair_proposal_id, "sam.reyes", "ok", arts)
+    approve_repair(store, policy, first.repair_proposal_id, "smooth.operator", "ok", arts)
     with pytest.raises(ApprovalError, match="re-run to get a fresh proposal"):
-        approve_repair(store, policy, second.repair_proposal_id, "sam.reyes", "ok", arts)
+        approve_repair(store, policy, second.repair_proposal_id, "smooth.operator", "ok", arts)
 
 
 def test_a_repair_that_touches_an_irreversible_step_needs_a_supervisor(world, arts, tmp_path):
@@ -177,7 +177,7 @@ def test_a_repair_that_touches_an_irreversible_step_needs_a_supervisor(world, ar
         if first.status != ReplayStatus.PENDING_APPROVAL:
             break
         from runs.approvals import decide_run
-        decide_run(store, policy, first.run_id, "approved", "dana.okafor", "refund checked")
+        decide_run(store, policy, first.run_id, "approved", "suzie.visor", "refund checked")
         res = runtime.run_replay("clinic.issue_refund", {}, target=None, base_url=base, enable_operator_console=False,
                                  artifacts_dir=arts, resume_run_id=first.run_id, evidence_dir=tmp_path / f"r{_}b")[0]
         if res.status != ReplayStatus.HARD_FAILURE:
@@ -187,12 +187,12 @@ def test_a_repair_that_touches_an_irreversible_step_needs_a_supervisor(world, ar
         assert p.confident, p.reason
         if p.touches_irreversible_step:
             with pytest.raises(ApprovalError, match="needs a supervisor"):
-                approve_repair(store, policy, p.id, "sam.reyes", "renamed", arts)
+                approve_repair(store, policy, p.id, "smooth.operator", "renamed", arts)
             seen_tiers.append("supervisor")
-            approve_repair(store, policy, p.id, "dana.okafor", "Confirm button renamed to 'Submit transaction'", arts)
+            approve_repair(store, policy, p.id, "suzie.visor", "Confirm button renamed to 'Submit transaction'", arts)
         else:
             seen_tiers.append("operator")
-            approve_repair(store, policy, p.id, "sam.reyes", "label changed in the vendor release", arts)
+            approve_repair(store, policy, p.id, "smooth.operator", "label changed in the vendor release", arts)
     assert "supervisor" in seen_tiers and "operator" in seen_tiers
     assert len(effects(base)) <= 1  # a failure at the commit step never posted twice
 
@@ -217,7 +217,7 @@ def test_no_confident_match_is_reported_as_such_and_cannot_be_approved(world, ar
     store = runtime.default_store()
     store.save_repair(proposal)
     with pytest.raises(ApprovalError, match="no confident match"):
-        approve_repair(store, PolicyConfig.load(), "rep_test", "sam.reyes", "ok", arts)
+        approve_repair(store, PolicyConfig.load(), "rep_test", "smooth.operator", "ok", arts)
 
 
 def test_llm_picker_can_only_choose_among_real_candidates(world, arts, tmp_path):
@@ -287,7 +287,7 @@ def test_repairing_a_step_also_repairs_its_checkpoint_on_the_same_element(world,
     failed = replay(world, arts, tmp_path)
     p = proposal_of(failed)
     assert p.capability_id == "clinic.login" and p.step_id == "s2"
-    approve_repair(runtime.default_store(), PolicyConfig.load(), p.id, "sam.reyes", "username field renamed", arts)
+    approve_repair(runtime.default_store(), PolicyConfig.load(), p.id, "smooth.operator", "username field renamed", arts)
 
     repaired = storage.load_artifact_by_id("clinic.login", arts)
     s2 = next(s for s in repaired.steps if s.step_id == "s2")

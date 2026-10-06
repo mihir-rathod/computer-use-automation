@@ -103,7 +103,7 @@ def test_approved_commit_is_recorded_with_provenance_and_replays_exactly_once(di
 
     def gate(req):
         asked.append(req)
-        return CommitDecision(True, approver="dana.okafor", mode="supervised")
+        return CommitDecision(True, approver="suzie.visor", mode="supervised")
 
     result = discover(surface, spec, ScriptedModel(refund_script(params["invoice"], "20.00", "duplicate_payment")), gate, params)
 
@@ -121,7 +121,7 @@ def test_approved_commit_is_recorded_with_provenance_and_replays_exactly_once(di
     commit = next(s for s in artifact.steps if s.risk_level == "irreversible")
     assert commit.idempotent is False and commit.target.semantic_description == "Confirm"
     [approval] = artifact.provenance.commit_approvals
-    assert (approval.step_id, approval.approver, approval.mode) == (commit.step_id, "dana.okafor", "supervised")
+    assert (approval.step_id, approval.approver, approval.mode) == (commit.step_id, "suzie.visor", "supervised")
     assert not has_errors(lint_artifact(artifact)), [str(f) for f in lint_artifact(artifact) if f.level == "error"]
     assert not any(f.code == "commit-not-approved" for f in lint_artifact(artifact))
 

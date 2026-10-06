@@ -11,8 +11,8 @@
 version: 1
 
 approvers:
-  sam.reyes: operator
-  dana.okafor: supervisor
+  smooth.operator: operator
+  suzie.visor: supervisor
 
 # A capability not listed under `capabilities` that has an irreversible step needs this approval. A task discovered from the console lands here until you
 # give it an entry of its own (with amount caps, a different tier, ...).

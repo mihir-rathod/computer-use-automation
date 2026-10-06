@@ -27,7 +27,7 @@ from surface.web import WebSurface
 
 MIN_SCORE = 0.5
 MIN_MARGIN = 0.15
-_ROLE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>[^']*)'\])?$")
+_ROLE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>.*)'\])?$")
 
 
 class Candidate(BaseModel):

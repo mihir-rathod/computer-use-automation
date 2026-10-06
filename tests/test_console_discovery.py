@@ -27,7 +27,7 @@ DETAILS = {
 }
 
 
-def read_script(patient_pattern=r'cell "[A-Za-z]+, ', provider_pattern=r'cell "(Dr|[A-Z])'):
+def read_script(patient_pattern=r'cell "[A-Za-z]+, ', provider_pattern=r'cell "Dr\. A\. Okafor"'):  # (a pattern that also matched the "Patient" label read the wrong cell for ages)
     return [
         ("type_text", lambda p: {"ref": ref(p, r'textbox.*(name="number"|no\.")'), "text": "A-20002"}),
         ("click", lambda p: {"ref": ref(p, r'button "Continue"')}),
@@ -361,17 +361,25 @@ def test_wandering_is_left_out_of_the_recording(discover, monkeypatch):
 
 
 def test_a_recording_that_never_uses_its_input_is_not_ready(discover):
-    """The model finds the answer by browsing the schedule, so the recording reads the same cell whatever it is asked: the replay 'works' and the answer is wrong."""
-    browse = [
-        ("navigate", lambda p: {"url": "/legacy/schedule?date=2026-03-04"}),
-        ("extract", lambda p: {"ref": ref(p, r'cell "Brennan'), "output_name": "patient"}),
-        ("extract", lambda p: {"ref": ref(p, r'cell "Dr\. A\. Okafor"'), "output_name": "provider"}),
-        ("finish", lambda p: {"reasoning": "found it in the schedule"}),
-    ]
-    discover.use(browse)
-    done = wait_for(discover, start(discover).json()["id"], ("ready", "needs_attention", "failed", "stuck"))
+    """The model types a fixed value instead of the one it was given, so the recording looks up the same record whatever it is asked: the replay 'works' and the answer is wrong."""
+    discover.use(find_script(number="A-20001"))  # not the example (A-20002), so it is not turned into the input
+    from_the_menu = {**DETAILS, "start_path": None}
+    done = wait_for(discover, start(discover, from_the_menu).json()["id"], ("ready", "needs_attention", "failed", "stuck"))
     assert done["status"] == "needs_attention" and "never uses the input 'appointment'" in done["error"], done
     assert done["verify"]["passed"] is True  # the replay alone could not see the problem: that is why this check exists
+
+
+def test_a_read_that_finds_its_cell_by_the_value_is_not_ready(discover):
+    """A table row with nothing beside the value saying what it is: the recording would look for the text it saw, which belongs to one record."""
+    contract = {**DETAILS, "start_path": "/legacy/schedule", "inputs": [{"name": "day", "example": "2026-03-04"}], "outputs": [{"name": "patient"}], "verify": None}
+    discover.use([
+        ("type_text", lambda p: {"ref": ref(p, r'textbox "Date"'), "text": "2026-03-04"}),
+        ("click", lambda p: {"ref": ref(p, r'button "Show"')}),
+        ("extract", lambda p: {"ref": ref(p, r'cell "Brennan'), "output_name": "patient"}),
+        ("finish", lambda p: {"reasoning": "read the first row"}),
+    ])
+    done = wait_for(discover, start(discover, contract).json()["id"], ("ready", "needs_attention", "failed", "stuck"))
+    assert done["status"] == "needs_attention" and "only work for this one record" in done["error"], done
 
 
 # ---- edge cases found while making discovery work on an unfamiliar system -----------------------------------------------------
@@ -415,7 +423,7 @@ def test_a_corrected_typo_and_a_stray_read_do_not_end_up_in_the_recording(discov
 
 def test_a_task_described_as_committing_that_never_commits_is_not_ready(discover):
     contract = {**REFUND, "task_name": "refund_review", "outputs": [{"name": "summary"}], "commit_approval": "auto_sandbox"}
-    steps = refund_steps(5) + [("extract", lambda p: {"ref": ref(p, r'cell "[^"]+"'), "output_name": "summary"}), ("finish", lambda p: {"reasoning": "done"})]
+    steps = refund_steps(5) + [("extract", lambda p: {"ref": ref(p, r'cell "[A-Za-z]+, [A-Za-z]+ \(LK'), "output_name": "summary"}), ("finish", lambda p: {"reasoning": "done"})]
     discover.use(steps)
     done = wait_for(discover, start(discover, contract).json()["id"], ("ready", "needs_attention", "failed", "stuck"))
     assert done["status"] == "needs_attention" and "no commit step was recorded" in done["error"], done

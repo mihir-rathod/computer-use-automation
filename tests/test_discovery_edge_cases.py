@@ -157,3 +157,27 @@ def test_a_model_going_round_in_circles_is_told_so():
     DiscoveryLoop(FakeSurface(pages), model, max_steps=8).run("do it", {})
     nudged = [p for p in model.prompts if "have been on this page" in p]
     assert nudged and "3 times" in nudged[0] and not any("have been on this page" in p for p in model.prompts[:4])
+
+
+# ---- found while benchmarking: a link whose name has an apostrophe, and reads that only work for one record ------------------------------
+
+def test_a_role_locator_can_name_something_with_an_apostrophe():
+    from surface.locator_resolver import _ROLE_VALUE_RE
+    m = _ROLE_VALUE_RE.match("link[name='Today's schedule']")
+    assert m.group("role") == "link" and m.group("name") == "Today's schedule"
+    assert _ROLE_VALUE_RE.match("button[name='Show']").group("name") == "Show" and _ROLE_VALUE_RE.match("textbox").group("name") is None
+
+
+def test_a_read_that_finds_its_cell_by_the_value_it_read_is_caught():
+    from discover.service import _reads_found_by_their_value
+    box = target("x")
+    by_value = Target(semantic_description="cell Brennan", locators=[Locator(strategy=LocatorStrategy.ROLE, value="cell[name='Brennan, Avery']")])
+    by_label = Target(semantic_description="value beside the 'Patient' label", locators=[Locator(strategy=LocatorStrategy.XPATH, value='(//td[.="Patient"]/following-sibling::td[1])[1]')])
+    page = state("/detail", el("c1", "cell", "Brennan, Avery"))
+
+    def read(tgt):
+        r = rec(ActionType.EXTRACT, page, page, ref="c1", output="patient", value="Brennan, Avery")
+        r.result.resolved_target = tgt
+        return r
+    assert box and "only work for this one record" in _reads_found_by_their_value([read(by_value)])
+    assert _reads_found_by_their_value([read(by_label)]) is None

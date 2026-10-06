@@ -203,6 +203,11 @@ class DiscoveryService:
                 return
             outcome["success_text"] = success
             outcome["success_decided"] = contract.success_text is None
+            by_value = _reads_found_by_their_value(result.transcript)
+            if by_value:
+                outcome["error"] = by_value
+                outcome["attention"] = True
+                return
             artifact = build_artifact(
                 result, params, capability_id=cid, version=version, name=spec.name, description=spec.description, target=spec.target,
                 preconditions=spec.preconditions, input_schema=spec.input_schema, output_schema=spec.output_schema,
@@ -305,6 +310,20 @@ class DiscoveryService:
             self.store.discovery_update(sid, status="running", commit_request_json=None)
             return CommitDecision(False, mode="supervised", note="cancelled" if self._stopped(sid) else f"nobody answered within {wait_s // 60} minutes")
         return ask
+
+
+def _reads_found_by_their_value(transcript: list[Any]) -> str | None:
+    """A step that finds the cell it reads by the text that cell showed last time ("Brennan, Avery") only works for that record. This catches a list or table where nothing
+    beside the value says what it is, which the recorder cannot describe in a way that carries over to other records."""
+    from artifacts_lib.schema import ActionType
+    for r in transcript:
+        if r.action.kind != ActionType.EXTRACT or not r.result.success or not r.result.extracted_value or r.result.resolved_target is None:
+            continue
+        value = str(r.result.extracted_value).strip()
+        if len(value) >= 3 and any(value in loc.value for loc in r.result.resolved_target.locators):
+            return (f"it reads '{r.output_name}' by looking for the text it saw last time (“{value}”), so it would only work for this one record. The value sits in a list or table "
+                    "with nothing beside it that says what it is. Choose a task whose answer has a label next to it, or point it at a page that shows one record")
+    return None
 
 
 def _judge(contract: DiscoveryContract, result: Any) -> dict[str, Any]:

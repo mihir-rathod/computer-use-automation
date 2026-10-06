@@ -13,7 +13,7 @@ from playwright.sync_api import TimeoutError as PWTimeoutError
 from artifacts_lib.schema import Locator as SchemaLocator
 from artifacts_lib.schema import LocatorStrategy, Target
 
-_ROLE_VALUE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>[^']*)'\])?$")
+_ROLE_VALUE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>.*)'\])?$")
 RESOLVE_TIMEOUT_MS = 2000
 
 

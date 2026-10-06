@@ -131,38 +131,38 @@ def pending(store: RunStore, requester: str = "alice") -> str:
 
 def test_approval_records_who_when_and_why(store):
     run = pending(store)
-    store.decide(run, "approved", "dana.okafor", "invoice checked, duplicate payment confirmed")
+    store.decide(run, "approved", "suzie.visor", "invoice checked, duplicate payment confirmed")
 
     approval = store.approvals_for(run)[0]
-    assert (approval["decision"], approval["decided_by"]) == ("approved", "dana.okafor")
+    assert (approval["decision"], approval["decided_by"]) == ("approved", "suzie.visor")
     assert approval["reason"].startswith("invoice checked") and approval["decided_at"]
     assert store.get(run)["status"] == APPROVED
 
 
 def test_requester_cannot_approve_their_own_run(store):
-    run = pending(store, requester="dana.okafor")
+    run = pending(store, requester="suzie.visor")
     with pytest.raises(ApprovalError, match="cannot approve"):
-        store.decide(run, "approved", "dana.okafor", "me")
+        store.decide(run, "approved", "suzie.visor", "me")
     assert store.get(run)["status"] == PENDING_APPROVAL
 
 
 def test_decision_needs_a_reason_and_can_only_be_made_once(store):
     run = pending(store)
     with pytest.raises(ApprovalError, match="reason"):
-        store.decide(run, "approved", "dana.okafor", "")
-    store.decide(run, "rejected", "dana.okafor", "amount does not match the claim")
+        store.decide(run, "approved", "suzie.visor", "")
+    store.decide(run, "rejected", "suzie.visor", "amount does not match the claim")
     with pytest.raises(ApprovalError, match="not waiting"):
-        store.decide(run, "approved", "dana.okafor", "changed my mind")
+        store.decide(run, "approved", "suzie.visor", "changed my mind")
 
 
 def test_tiers_follow_the_roster():
     policy = PolicyConfig.load()
-    assert may_approve(policy, "dana.okafor", "supervisor")[0]
-    assert may_approve(policy, "sam.reyes", "operator")[0]
-    ok, why = may_approve(policy, "sam.reyes", "supervisor")
+    assert may_approve(policy, "suzie.visor", "supervisor")[0]
+    assert may_approve(policy, "smooth.operator", "operator")[0]
+    ok, why = may_approve(policy, "smooth.operator", "supervisor")
     assert not ok and "needs a supervisor" in why
     assert not may_approve(policy, "nobody", "operator")[0]
-    assert may_approve(policy, "dana.okafor", "operator")[0]  # a supervisor outranks an operator tier
+    assert may_approve(policy, "suzie.visor", "operator")[0]  # a supervisor outranks an operator tier
 
 
 # ---- policy -------------------------------------------------------------------------------------
@@ -291,7 +291,7 @@ def test_supervisor_tier_waits_for_approval_then_runs_with_the_commit_step_confi
     again, _ = runtime.run_replay("mockbank.open_subaccount", params, policy=policy, requested_by="alice", idempotency_key="open-1")
     assert again.error.code == "idempotency_conflict" and again.run_id == first.run_id
 
-    store.decide(first.run_id, "approved", "dana.okafor", "member confirmed by phone")
+    store.decide(first.run_id, "approved", "suzie.visor", "member confirmed by phone")
     done, _ = runtime.run_replay("mockbank.open_subaccount", {}, policy=policy, resume_run_id=first.run_id)
 
     assert done.status == ReplayStatus.SUCCESS and done.run_id == first.run_id
@@ -308,7 +308,7 @@ def test_rejected_run_cannot_be_resumed(no_browser, tmp_path):
     policy.capabilities["mockbank.open_subaccount"].caps.max_param = {}
     first, _ = runtime.run_replay("mockbank.open_subaccount", {"member_id": "10001", "account_type": "savings", "initial_deposit": 5.0},
                                   policy=policy, requested_by="alice", evidence_dir=tmp_path / "e")
-    runtime.default_store().decide(first.run_id, "rejected", "dana.okafor", "not authorised by the member")
+    runtime.default_store().decide(first.run_id, "rejected", "suzie.visor", "not authorised by the member")
     with pytest.raises(ValueError, match="not approved"):
         runtime.run_replay("mockbank.open_subaccount", {}, policy=policy, resume_run_id=first.run_id)
     assert no_browser == []
@@ -349,12 +349,12 @@ def test_decide_run_enforces_the_roster_and_tier(store):
     run = pending(store, requester="alice")  # a supervisor-tier request
 
     with pytest.raises(ApprovalError, match="needs a supervisor"):
-        decide_run(store, policy, run, "approved", "sam.reyes", "looks fine")
+        decide_run(store, policy, run, "approved", "smooth.operator", "looks fine")
     with pytest.raises(ApprovalError, match="not on the approver roster"):
         decide_run(store, policy, run, "approved", "mallory", "trust me")
     assert store.get(run)["status"] == PENDING_APPROVAL
 
-    decide_run(store, policy, run, "approved", "dana.okafor", "checked the invoice")
+    decide_run(store, policy, run, "approved", "suzie.visor", "checked the invoice")
     assert store.get(run)["status"] == APPROVED
 
 

@@ -26,7 +26,7 @@ def run(world, capability, params, tmp_path, target="clinic", **kw):
     return runtime.run_replay(capability, params, target=target, base_url=base, enable_operator_console=False, **kw)
 
 
-def approve_and_resume(world, first, tmp_path, who="dana.okafor", why="checked against the invoice"):
+def approve_and_resume(world, first, tmp_path, who="suzie.visor", why="checked against the invoice"):
     decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", who, why)
     return run(world, first.capability_id, {}, tmp_path, target=None, resume_run_id=first.run_id)
 
@@ -76,25 +76,25 @@ def test_cancel_needs_an_operator_approval_then_posts_once(world, tmp_path):
     assert first.status == ReplayStatus.PENDING_APPROVAL and first.approval_tier == "operator"
     assert effects(base, "appointment.cancel") == []
 
-    done, _ = approve_and_resume(world, first, tmp_path, who="sam.reyes")
+    done, _ = approve_and_resume(world, first, tmp_path, who="smooth.operator")
     assert done.status == ReplayStatus.SUCCESS, done.error
     assert done.committed and done.outputs["receipt_number"].startswith("CXL-")
     assert len(effects(base, "appointment.cancel")) == 1
     approval = runtime.default_store().approvals_for(first.run_id)[0]
-    assert (approval["decided_by"], approval["tier"]) == ("sam.reyes", "operator") and approval["reason"]
+    assert (approval["decided_by"], approval["tier"]) == ("smooth.operator", "operator") and approval["reason"]
 
 
 def test_cancel_unknown_appointment_is_not_found(world, tmp_path):
     base, _ = world
     first, _ = run(world, "clinic.cancel_appointment", {"appointment": "A-99999", "reason": "weather"}, tmp_path)
-    res, _ = approve_and_resume(world, first, tmp_path, who="sam.reyes")
+    res, _ = approve_and_resume(world, first, tmp_path, who="smooth.operator")
     assert res.business_outcome == "not_found" and effects(base, "appointment.cancel") == []
 
 
 def test_submit_claim(world, tmp_path):
     base, fixtures = world
     first, _ = run(world, "clinic.submit_claim", {"invoice": fixtures["self_pay"]["invoice"], "amount": "10.00"}, tmp_path)
-    res, _ = approve_and_resume(world, first, tmp_path, who="sam.reyes")
+    res, _ = approve_and_resume(world, first, tmp_path, who="smooth.operator")
     # a self-pay invoice may not be claimable; either way the outcome is an answer, never a crash, and state matches the audit log
     assert res.status in (ReplayStatus.SUCCESS, ReplayStatus.BUSINESS_OUTCOME), res.error
     assert len(effects(base, "claim.submit")) == (1 if res.status == ReplayStatus.SUCCESS else 0)
@@ -108,7 +108,7 @@ def test_refund_requires_a_supervisor_and_a_sam_cannot_approve_it(world, tmp_pat
 
     from runs.store import ApprovalError
     with pytest.raises(ApprovalError, match="needs a supervisor"):
-        decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "sam.reyes", "ok")
+        decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "smooth.operator", "ok")
 
     done, _ = approve_and_resume(world, first, tmp_path)
     assert done.status == ReplayStatus.SUCCESS and done.outputs["receipt_number"].startswith("RFD-")
@@ -185,7 +185,7 @@ def test_response_lost_after_the_commit_is_not_retried_and_the_refund_posts_once
     assert len(effects(base)) == 1
 
     store = runtime.default_store()
-    store.resolve(ambiguous.run_id, "committed", "dana.okafor", "refund RFD-000001 is in the clinic ledger")
+    store.resolve(ambiguous.run_id, "committed", "suzie.visor", "refund RFD-000001 is in the clinic ledger")
     again, _ = run(world, "clinic.issue_refund", refund_params(world), tmp_path, idempotency_key="refund-B", requested_by="alex")
     assert again.deduplicated and len(effects(base)) == 1
 
@@ -198,7 +198,7 @@ def test_a_lost_request_that_never_landed_can_be_retried_once_settled(world, tmp
     assert ambiguous.status == ReplayStatus.NEEDS_REVIEW
     assert effects(base) == []  # the engine could not know this; the audit log does
 
-    runtime.default_store().resolve(ambiguous.run_id, "not_committed", "dana.okafor", "ledger shows no refund for INV-30001")
+    runtime.default_store().resolve(ambiguous.run_id, "not_committed", "suzie.visor", "ledger shows no refund for INV-30001")
     done = approved_refund(world, tmp_path, "refund-C")[0]
     assert done.status == ReplayStatus.SUCCESS
     assert len(effects(base)) == 1
@@ -224,7 +224,7 @@ def test_evidence_for_a_run_redacts_pii_but_keeps_the_audit_trail(world, tmp_pat
 
 def test_an_approved_run_cannot_be_resumed_as_a_different_account(world, tmp_path):
     first, _ = run(world, "clinic.write_off_balance", {"invoice": "INV-30002", "amount": "10.00", "reason": "uncollectible"}, tmp_path, target="clinic")
-    decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "dana.okafor", "ok")
+    decide_run(runtime.default_store(), runtime.default_policy(), first.run_id, "approved", "suzie.visor", "ok")
     with pytest.raises(ValueError, match="requested for target 'clinic'"):
         run(world, first.capability_id, {}, tmp_path, target="clinic_supervisor", resume_run_id=first.run_id)
 

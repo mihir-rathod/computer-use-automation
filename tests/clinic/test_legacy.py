@@ -154,3 +154,13 @@ def test_the_schedule_has_labels_a_date_picker_and_neighbouring_days(app):
     assert '<th scope="col">Appt no.</th>' in html and "<caption>" in html
     assert "A-20002" in html and 'href="/legacy/appointments/A-20002"' in html
     assert "Date must be in YYYY-MM-DD format." in login(app).get("/legacy/schedule?date=banana").text  # the server still checks it
+
+
+def test_find_invoice_is_a_read_only_lookup_by_number(app):
+    c = login(app)
+    assert "Find invoice" in c.get("/legacy/menu").text
+    assert c.post("/legacy/fn/invoice", data={"number": "inv-30002"}).headers["location"] == "/legacy/invoices/INV-30002"
+    page = c.get("/legacy/invoices/INV-30002").text
+    assert "Balance due" in page and "$124.00" in page and "Brennan, Avery" in page
+    assert "RECORD NOT FOUND" in c.post("/legacy/fn/invoice", data={"number": "INV-99999"}).text
+    assert app.state.world.audit.list(effects_only=True) == []  # looking changes nothing
