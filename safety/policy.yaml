@@ -26,6 +26,13 @@ discovery:
   timeout_s: 300
   commit_wait_s: 900
 
+# A run that hits something unexpected (a screen that changed, a step that cannot be found) pauses for a person to take over from the console, instead of
+# failing. It holds a browser worker while it waits, so it is stopped after wait_s, and only max_paused runs may wait at once.
+escalation:
+  enabled: true
+  wait_s: 600
+  max_paused: 1
+
 capabilities:
   clinic.issue_refund:
     approval: supervisor

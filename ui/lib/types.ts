@@ -26,6 +26,7 @@ export interface RunView {
   id: string; capability_id: string; version: string | null; status: string; requested_by: string; target: string | null; idempotency_key: string | null;
   committed: boolean; commit_step: string | null; error_code: string | null; created_at: string; started_at: string | null; finished_at: string | null;
   resolution: string | null; params: Record<string, unknown>; evidence: string | null; has_trace: boolean; pace_ms: number; show_window: boolean;
+  paused?: { reason: string; step_id: string | null; since: string; stops_in_s: number | null; being_helped: boolean } | null;
   approvals?: Approval[]; result?: RunResult | null; repairs?: { id: string; status: string; step_id: string; confident: boolean }[];
 }
 export interface RunResult {
@@ -50,7 +51,7 @@ export interface CapMetrics { capability_id: string; runs: number; settled: numb
 export interface Metrics { capabilities: CapMetrics[]; totals: { runs: number; pending_approvals: number; pending_repairs: number; failing_canaries: string[] }; browser_pool: Record<string, number> }
 
 export interface ArtifactDiff { capability_id: string; version_a: string; version_b: string; metadata: string[]; schema: string[]; safety: string[]; error_handling: string[]; steps: { kind: string; step: string; summary: string; details: string[] }[] }
-export interface PolicyView { default_approval: string; discovery: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
+export interface PolicyView { escalation: { enabled: boolean; wait_s: number; max_paused: number }; default_approval: string; discovery: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
 export interface KeyRow { id: number; name: string; role: Role; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
 export interface RepairItemLite { id: string; confident: boolean; touches_irreversible_step: boolean }
@@ -73,4 +74,10 @@ export interface DiscoverSession {
   stop_reason: string | null; reasoning: string | null; steps: number | null; error: string | null; retry_of: string | null; verify: DiscoverVerify | null;
   contract?: DiscoveryContract; lint?: { level: string; code: string; message: string; step_id: string | null }[] | null;
   commit_request?: { description: string; url: string; page_title: string; goal: string | null; at: string } | null; turns?: DiscoverTurn[]; draft_url?: string | null;
+}
+
+export interface EscalationElement { ref: string; role: string; name: string | null; value: string | null; options: string[] | null; disabled: boolean }
+export interface EscalationState {
+  paused: RunView["paused"]; goal: string | null; capability_id: string | null; url: string | null; title: string | null; elements: EscalationElement[];
+  has_screenshot: boolean; screenshot_token: number; last_action: { ok: boolean; error: string | null; kind: string } | null;
 }

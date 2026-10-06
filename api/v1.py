@@ -22,6 +22,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -119,6 +120,7 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
     out["params"] = _mask(json.loads(row["params_json"]))
     out["evidence"] = Path(row["evidence_dir"]).name if row.get("evidence_dir") else None
     out["has_trace"] = bool(row.get("evidence_dir")) and (Path(row["evidence_dir"]) / "trace.zip").exists()
+    out["paused"] = _paused(row)
     if detail:
         out["approvals"] = store.approvals_for(row["id"])
         result = store.stored_result(row)
@@ -126,6 +128,27 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
         out["repairs"] = [{"id": r["id"], "status": r["status"], "step_id": r["step_id"], "confident": bool(r["confident"])}
                           for r in store.list_repairs() if r["run_id"] == row["id"]]
     return out
+
+
+def _session(row: dict[str, Any]) -> Any:
+    """The live session of a run that is executing in this process, if it is waiting for or being helped by a person."""
+    from escalation.registry import get_session
+    from escalation.session_manager import SessionMode
+    if row["status"] != "running" or not row.get("evidence_dir"):
+        return None
+    session = get_session(Path(row["evidence_dir"]).name)
+    return session if session is not None and session.mode != SessionMode.AUTOMATION else None
+
+
+def _paused(row: dict[str, Any]) -> dict[str, Any] | None:
+    session = _session(row)
+    if session is None:
+        return None
+    snap = session.snapshot()
+    since = snap["paused_at"] or time.time()
+    left = max(0, int(snap["max_wait_s"] - (time.time() - since))) if snap["max_wait_s"] else None
+    return {"reason": snap["pause_reason"], "step_id": snap["current_step_id"], "since": datetime.fromtimestamp(since, UTC).isoformat(timespec="seconds"),
+            "stops_in_s": left, "being_helped": snap["mode"] == "human_active"}
 
 
 def _get_run(run_id: str) -> dict[str, Any]:
@@ -158,6 +181,8 @@ class SubmitRun(BaseModel):
     dry_run: bool = Field(default=False, description="Run up to, not including, the first irreversible step; nothing is committed.")
     pace_ms: int = Field(default=0, ge=0, le=MAX_PACE_MS, description="Watch mode: pause this long around each action and outline the element it touches, so a person can follow the run.")
     show_window: bool = Field(default=False, description="Also open a visible browser window on the machine the server runs on. Only when the server allows it (see /v1/features).")
+    pause_for_human: bool | None = Field(default=None, description="If the run gets stuck, pause for a person to take over (true) or fail at once (false). Default: whatever the policy says. "
+                                                                    "A client with no person watching, such as an AI assistant, should say false.")
 
 
 class Decision(BaseModel):
@@ -188,7 +213,8 @@ def submit_run(body: SubmitRun, idempotency_key: str | None = Header(default=Non
     try:
         prepared = runtime.prepare_run(body.capability_id, body.params, target=body.target, requested_by=who.name, idempotency_key=idempotency_key,
                                        dry_run=body.dry_run, enable_operator_console=False, queued=True, version=body.version, artifacts_dir=adir(),
-                                       pace_ms=body.pace_ms, show_window=body.show_window)
+                                       pace_ms=body.pace_ms, show_window=body.show_window,
+                                       pause_for_human=runtime.default_policy().escalation.enabled and body.pause_for_human is not False)
     except (FileNotFoundError, storage.UnknownVersion):
         raise HTTPException(404, f"unknown capability or version '{body.capability_id}' {body.version or ''}".strip()) from None
     if isinstance(prepared, runtime.Early):
@@ -261,9 +287,95 @@ def cancel_run(run_id: str, who: Principal = Depends(require("operator"))) -> di
     row = _get_run(run_id)
     if row["status"] not in ("queued", "running"):
         raise HTTPException(409, f"run {run_id} is {row['status']}; only a queued or running run can be cancelled")
+    session = _session(row)
+    if session is not None:
+        session.cancel(by=who.name)  # a run waiting for a person is blocked in its pause, not between actions: end the pause too
     if not executor().cancel(run_id):
         raise HTTPException(409, f"run {run_id} is not running in this server process")
     return {"id": run_id, "cancelling": True, "by": who.name}
+
+
+# ---- taking over a run that is waiting for a person ------------------------------------------------------------------------------
+
+def _waiting_session(run_id: str) -> Any:
+    row = _get_run(run_id)
+    session = _session(row)
+    if session is None:
+        raise HTTPException(409, f"run {run_id} is not waiting for a person (it is {row['status']}"
+                                 f"{', and no longer paused' if row['status'] == 'running' else ''}); it may have finished, timed out or been stopped")
+    return session
+
+
+@router.get("/runs/{run_id}/escalation")
+def escalation(run_id: str, _: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """What a person needs to help: why the run stopped, the page as the model of the run sees it (its elements, with the refs actions use), and how their
+    last action went. Polled while the take-over panel is open."""
+    row = _get_run(run_id)
+    session = _session(row)
+    if session is None:
+        return {"paused": None, "elements": [], "url": None, "last_action": None}
+    snap = session.snapshot()
+    observed = snap["observed"]
+    elements = [{"ref": e.ref, "role": e.role, "name": e.name or e.html_name, "value": e.value, "options": e.options, "disabled": "disabled" in (e.state or {})}
+                for e in (observed.elements if observed else [])]
+    last = snap["last_human_result"]
+    return {"paused": _paused(row), "goal": snap["goal"], "capability_id": snap["capability_id"], "url": observed.url if observed else None,
+            "title": observed.title if observed else None, "elements": elements, "has_screenshot": bool(observed and observed.screenshot_path),
+            "screenshot_token": int(last["at"] * 1000) if last else int((snap["paused_at"] or 0) * 1000),
+            "last_action": {"ok": last["ok"], "error": last["error"], "kind": last["kind"]} if last else None}
+
+
+@router.get("/runs/{run_id}/escalation/screenshot")
+def escalation_screenshot(run_id: str, _: Principal = Depends(require("operator"))):
+    from fastapi.responses import FileResponse
+    session = _waiting_session(run_id)
+    observed = session.snapshot()["observed"]
+    path = Path(observed.screenshot_path) if observed and observed.screenshot_path else None
+    allowed = Path(_get_run(run_id)["evidence_dir"]).resolve()
+    if path is None or not path.exists() or not path.resolve().is_relative_to(allowed):
+        raise HTTPException(404, "no screenshot yet")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+class EscalationAct(BaseModel):
+    kind: Literal["click", "type", "select"]
+    ref: str = Field(min_length=1, description="An element ref from GET .../escalation.")
+    value: str | None = Field(default=None, description="The text to type, or the option to choose.")
+
+
+@router.post("/runs/{run_id}/escalation/act", status_code=202)
+def escalation_act(run_id: str, body: EscalationAct, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """One action by a person, performed on the paused run's own browser session. It is queued and carried out by the thread that owns the page; read the
+    result from GET .../escalation. Taking an irreversible step this way is not possible: that is what approvals are for."""
+    from artifacts_lib.schema import ActionType
+    from surface.base import Action
+
+    session = _waiting_session(run_id)
+    observed = session.snapshot()["observed"]
+    if observed is None or body.ref not in {e.ref for e in observed.elements}:
+        raise HTTPException(409, "that element is no longer on the page; the page has changed, so choose again from the current list")
+    if body.kind in ("type", "select") and body.value is None:
+        raise HTTPException(422, f"'{body.kind}' needs a value")
+    kind = {"click": ActionType.CLICK, "type": ActionType.TYPE, "select": ActionType.SELECT}[body.kind]
+    params = {"text": body.value} if kind == ActionType.TYPE else {"value": body.value} if kind == ActionType.SELECT else {}
+    session.request_action(Action(kind=kind, ref=body.ref, params=params, actor="human", confirmed=False), by=who.name)
+    observability.log("run.taken_over", run_id=run_id, by=who.name, kind=body.kind)
+    return {"queued": True}
+
+
+@router.post("/runs/{run_id}/escalation/resume")
+def escalation_resume(run_id: str, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """Hands the run back. It checks whether the step is now satisfied before doing anything itself, so what the person did is not repeated."""
+    _waiting_session(run_id).resume(by=who.name)
+    observability.log("run.resumed", run_id=run_id, by=who.name)
+    return {"resumed": True}
+
+
+@router.post("/runs/{run_id}/escalation/stop")
+def escalation_stop(run_id: str, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    _waiting_session(run_id).cancel(by=who.name)
+    observability.log("run.stopped_by_person", run_id=run_id, by=who.name)
+    return {"stopped": True}
 
 
 @router.get("/approvals")
@@ -283,7 +395,8 @@ def approve(run_id: str, body: Decision, who: Principal = Depends(require("opera
         decide_run(store, policy, run_id, "approved", who.name, body.reason, role=who.role)
         if not body.execute:
             return run_view(_get_run(run_id), detail=True)
-        prepared = runtime.prepare_run("", {}, target=None, resume_run_id=run_id, enable_operator_console=False, queued=True, artifacts_dir=adir())
+        prepared = runtime.prepare_run("", {}, target=None, resume_run_id=run_id, enable_operator_console=False, queued=True, artifacts_dir=adir(),
+                                       pause_for_human=policy.escalation.enabled)
         return _start(prepared)
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc
@@ -416,7 +529,7 @@ def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
     return {
         "approvers": p.approvers,
         "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
-        "default_approval": p.default_approval, "discovery": p.discovery.model_dump(),
+        "default_approval": p.default_approval, "discovery": p.discovery.model_dump(), "escalation": p.escalation.model_dump(),
         "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
         "risk_keywords": p.risk_keywords.model_dump(),
         "redaction": {"patterns": sorted(p.redaction.patterns), "field_names": p.redaction.field_names},
@@ -494,9 +607,10 @@ def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
                          "description": p.old_target.semantic_description})
     discovery_commits = [{"id": t["id"], "capability_id": t["capability_id"], "created_by": t["created_by"], "request": json.loads(t["commit_request_json"]) if t["commit_request_json"] else None}
                      for t in store.discovery_active() if t["status"] == "awaiting_commit"]
-    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "discovery_commits": discovery_commits,
-            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "discovery_commits": len(discovery_commits),
-                       "total": len(approvals_) + len(reviews) + len(repairs_) + len(discovery_commits)}}
+    paused = [run_view(r) for r in store.list_runs(status="running", limit=100) if _session(r) is not None]
+    return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "discovery_commits": discovery_commits, "paused": paused,
+            "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "discovery_commits": len(discovery_commits), "paused": len(paused),
+                       "total": len(approvals_) + len(reviews) + len(repairs_) + len(discovery_commits) + len(paused)}}
 
 
 # ---- repairs ---------------------------------------------------------------------------------------------------------

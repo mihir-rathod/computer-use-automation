@@ -144,7 +144,7 @@ def say(body: Say, who: Principal = Depends(require("operator"))) -> dict[str, A
 
     prepared = runtime.prepare_run(artifact.capability_id, args, target=target, requested_by=who.name, idempotency_key=f"chat-{uuid.uuid4()}",
                                    enable_operator_console=False, queued=True, artifacts_dir=adir(),
-                                   pace_ms=body.pace_ms, show_window=body.show_window)
+                                   pace_ms=body.pace_ms, show_window=body.show_window, pause_for_human=runtime.default_policy().escalation.enabled)
     if isinstance(prepared, runtime.Early):
         result = prepared.result
         text = (f"I couldn't start {artifact.name.lower()}: {result.error.message}" if result.error else f"{artifact.name} didn't start ({result.status.value}).")

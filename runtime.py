@@ -233,6 +233,7 @@ def prepare_run(
     version: str | None = None,
     pace_ms: int = 0,
     show_window: bool = False,
+    pause_for_human: bool = False,
 ) -> Early | Prepared:
     """Everything that happens before a browser is needed: input validation, policy caps, the idempotency claim, the approval
     request and the run record. Returns `Early` when the answer is already known (refused, deduplicated, waiting for approval)
@@ -340,7 +341,7 @@ def prepare_run(
                 enable_operator_console=enable_operator_console, dry_run=dry_run, cancel_event=cancel_event_ or cancel_event,
                 deadline_s=(deadline_s + len(artifact.steps) * 2 * pace_ms / 1000 + 5) if (deadline_s and pace_ms) else deadline_s,
                 confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
-                policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir,
+                policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir, pause_for_human=pause_for_human,
             )
         except Exception as exc:  # noqa: BLE001
             # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
@@ -367,6 +368,14 @@ def prepare_run(
 
 
 _UNREACHABLE = ("ERR_CONNECTION_REFUSED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_TIMED_OUT", "ERR_ADDRESS_UNREACHABLE", "ERR_CONNECTION_RESET", "ERR_INTERNET_DISCONNECTED")
+
+
+def _room_to_pause(policy: PolicyConfig) -> Callable[[SessionManager], bool]:
+    def may_pause(session: SessionManager) -> bool:
+        from escalation.registry import paused_sessions
+        allowed = min(policy.escalation.max_paused, max(0, get_pool().size - 1))  # never let waiting runs take every browser worker
+        return len([s for s in paused_sessions() if s is not session]) < allowed
+    return may_pause
 
 
 def _on_sign_in_page(page: Any, profile: dict[str, Any]) -> bool:
@@ -428,7 +437,7 @@ def _replay_in_browser(
     password: str | None, allowlist: str | None, headed: bool, slow_mo: int, evidence_dir: Path, operator_port: int,
     enable_operator_console: bool, dry_run: bool, deadline_s: float | None, cancel_event: threading.Event | None,
     confirmed_steps: frozenset[str], policy: PolicyConfig,
-    repair_hook: Any = None, artifacts_dir: Path | None = None, pace_ms: int = 0,
+    repair_hook: Any = None, artifacts_dir: Path | None = None, pace_ms: int = 0, pause_for_human: bool = False,
 ) -> ReplayResult:
     """Launch a browser, log in, deterministically replay one capability, write evidence.
 
@@ -496,8 +505,13 @@ def _replay_in_browser(
             observability.log("run.signed_in", target=target, login_capability=profile["login_capability"])
             surface.pace_ms = max(0, int(pace_ms))
 
-            if enable_operator_console:
-                session = SessionManager(evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None)
+            if enable_operator_console or pause_for_human:
+                # With the operator console (the CLI) a stuck run waits for as long as it takes. For a run started from the console or API it waits a
+                # bounded time, and only if there is a browser worker to spare: a paused run holds one.
+                session = SessionManager(
+                    evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None,
+                    max_wait_s=float(policy.escalation.wait_s) if pause_for_human else None,
+                    may_pause=_room_to_pause(policy) if pause_for_human else None, pause_on_blocked=not pause_for_human)
                 register_session(session)
 
             engine = ReplayEngine(

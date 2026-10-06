@@ -65,7 +65,7 @@ class EvidenceConfig(BaseModel):
 
 
 class DiscoveryConfig(BaseModel):
-    """Discovery a new task (discovery from the console). A model drives a real browser and sees what the page shows, so it is limited to sandbox
+    """Discovering a new task from the console. A model drives a real browser and sees what the page shows, so it is limited to sandbox
     targets unless a policy owner opts in, and then only for tasks that read."""
     non_sandbox_read_only: bool = False
     max_steps: int = Field(default=25, ge=3, le=60)
@@ -73,10 +73,19 @@ class DiscoveryConfig(BaseModel):
     commit_wait_s: int = Field(default=900, ge=30, le=7200, description="How long a discovery session waits for a supervisor to approve its commit step.")
 
 
+class EscalationConfig(BaseModel):
+    """A run that gets stuck can pause for a person instead of failing. A paused run holds one browser worker, so it only waits so long, and only
+    this many may wait at once (always leaving at least one worker free for other runs)."""
+    enabled: bool = True
+    wait_s: int = Field(default=600, ge=30, le=3600, description="How long a paused run waits for a person before it is stopped.")
+    max_paused: int = Field(default=1, ge=1, le=5, description="How many runs may be waiting for a person at the same time.")
+
+
 class PolicyConfig(BaseModel):
     version: Literal[1] = 1
     default_approval: ApprovalTier = Field(default="supervisor", description="For a capability not listed below that has an irreversible step: who must approve it. A newly discovered task lands here.")
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    escalation: EscalationConfig = Field(default_factory=EscalationConfig)
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     approvers: dict[str, Role] = Field(default_factory=dict)

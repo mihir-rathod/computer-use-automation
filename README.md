@@ -12,7 +12,8 @@ replay**: no model, no tokens, with safety gating, human approval and a full evi
 - **Run a task** from a form generated from its input schema. A task that commits something (a refund, a claim) waits for a supervisor's approval, and a retry can never post twice.
 - **Watch it run**, with a pause around each step and the element about to be touched outlined, or just read the step timeline and screenshots afterwards.
 - **Discover a new task** by describing it in a sentence. The model works it out on a practice copy, you review the recording, and from then on it replays with no model.
-- **Handle what needs a person** in one inbox: approvals, runs whose outcome is unknown, and proposed repairs after a screen changed.
+- **Handle what needs a person** in one inbox: approvals, runs whose outcome is unknown, proposed repairs after a screen changed, and runs that got stuck. A stuck run pauses instead of failing; an operator takes over
+  its own browser from the run page (click, type, choose), then hands it back or stops it. It waits a limited time, and only one run may wait at once.
 - **Use it from anywhere else**: an authenticated HTTP API, a command line, or any MCP-capable AI assistant.
 
 ## Run it
@@ -158,7 +159,7 @@ uv run python cli.py metrics --hours 24
 uv run pytest
 ```
 
-419 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
+430 tests pass. The suite starts the clinic in-process and drives a real Chromium, so it takes about 12 minutes. Eight tests call the real model (discovery from a sentence,
 chat, escalation) and skip without `GEMINI_API_KEY`. The modern-skin browser tests skip until `clinic/modern` is built (`cd clinic/modern && npm install && npm run build`).
 
 ## Results and roadmap
@@ -167,4 +168,4 @@ chat, escalation) and skip without `GEMINI_API_KEY`. The modern-skin browser tes
 - **Drift recovery:** replays recovered 7 of 7 tasks at each of three UI-drift levels (changed ids and classes, then labels, then form field names) through human-approved repair proposals
   (`scripts/drift_report.py`).
 - **Discovery:** from one sentence, the model drafts a task, works it out in about 20 seconds on a practice system, and the recording gave the right answers for 14 other records in each of 3 live runs.
-- **Roadmap:** a benchmark of success and recovery rates, CI, a hosted demo, taking over a paused run, and discovering a task on the clinic's React skin.
+- **Roadmap:** a benchmark of success and recovery rates, CI, a hosted demo, and discovering a task on the clinic's React skin.

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApi, useAuth, useNow, useToast } from "@/lib/hooks";
 import { atLeast, type PendingApproval, type RunView, type Candidate } from "@/lib/types";
 import { age, formatValue, label } from "@/lib/format";
@@ -9,7 +9,7 @@ import { ApprovalActions, ReasonDialog, ResolveActions, Shot, Lightbox, useDecid
 import { IconCheck } from "@/components/icons";
 
 interface RepairItem { id: string; capability_id: string; step_id: string; run_id: string | null; created_at: string; confident: boolean; reason: string; touches_irreversible_step: boolean; old_locators: { strategy: string; value: string }[]; new_locators: { strategy: string; value: string }[]; candidates: Candidate[]; has_screenshot: boolean; page_url: string | null; description: string }
-interface Inbox { approvals: PendingApproval[]; needs_review: RunView[]; repairs: RepairItem[]; counts: { approvals: number; needs_review: number; repairs: number; total: number } }
+interface Inbox { approvals: PendingApproval[]; needs_review: RunView[]; repairs: RepairItem[]; paused: RunView[]; counts: { approvals: number; needs_review: number; repairs: number; paused: number; total: number } }
 
 const loc = (l: { strategy: string; value: string }) => `${l.strategy}: ${l.value}`;
 
@@ -49,19 +49,30 @@ const run_link = (r: RepairItem) => r.run_id ? <Link className="small" href={`/r
 export default function InboxPage() {
   const inbox = useApi<Inbox>("/v1/inbox", { every: 6000 });
   const now = useNow(30000);
-  const [tab, setTab] = useState<"approvals" | "needs_review" | "repairs">("approvals");
+  const [tab, setTab] = useState<"paused" | "approvals" | "needs_review" | "repairs">("approvals");
+  const [picked, setPicked] = useState(false);
   const [shot, setShot] = useState<{ url: string; alt: string } | null>(null);
   const d = inbox.data;
+  // land on the most urgent thing waiting: a run that is stuck right now, before approvals
+  useEffect(() => { if (d && !picked && d.counts.total > 0) { setPicked(true); if (d.counts.paused > 0) setTab("paused"); else if (d.counts.approvals === 0 && d.counts.needs_review > 0) setTab("needs_review"); } }, [d, picked]);
   const toast = useToast(); void toast;
   const tabBtn = (key: typeof tab, text: string, n?: number) => <button role="tab" aria-selected={tab === key} className="tab" onClick={() => setTab(key)}>{text}{n ? <span className="pill wait" style={{ marginLeft: 8 }}>{n}</span> : null}</button>;
   return (
     <div className="page">
-      <PageHead title="Inbox" sub="Everything waiting for a person: approvals before something is committed, runs whose outcome is unknown, and proposed repairs after a screen changed." />
+      <PageHead title="Inbox" sub="Everything waiting for a person: runs that got stuck, approvals before something is committed, runs whose outcome is unknown, and proposed repairs after a screen changed." />
       {inbox.error && !d ? <ErrorState error={inbox.error} retry={inbox.reload} /> : !d ? <Skeleton lines={4} /> : d.counts.total === 0 ? (
         <div className="card"><Empty icon={<IconCheck />} title="You're all caught up">Approvals, unknown outcomes and repair proposals appear here the moment they need someone.</Empty></div>
       ) : (
         <>
-          <div className="tabs" role="tablist">{tabBtn("approvals", "Approvals", d.counts.approvals)}{tabBtn("needs_review", "Unknown outcomes", d.counts.needs_review)}{tabBtn("repairs", "Repairs", d.counts.repairs)}</div>
+          <div className="tabs" role="tablist">{tabBtn("paused", "Waiting for a person", d.counts.paused)}{tabBtn("approvals", "Approvals", d.counts.approvals)}{tabBtn("needs_review", "Unknown outcomes", d.counts.needs_review)}{tabBtn("repairs", "Repairs", d.counts.repairs)}</div>
+          {tab === "paused" && (d.paused.length === 0 ? <div className="card"><Empty title="Nothing is stuck" /></div> : (
+            <div className="stack">{d.paused.map((r) => (
+              <article key={r.id} className="card card-pad stack" style={{ gap: 10 }}>
+                <div className="row"><Link className="rowlink" href={`/run/?id=${r.id}`} style={{ fontSize: 15 }}>{r.capability_id}</Link><span className="pill wait">Needs a person</span><span className="spacer" />
+                  <span className="small muted">asked by <strong>{r.requested_by}</strong> · stuck {age(r.paused?.since, now)}{r.paused?.being_helped ? " · someone is helping" : ""}</span></div>
+                <p className="small">{r.paused?.step_id ? `It could not do step ${r.paused.step_id}: ` : ""}{r.paused?.reason}</p>
+                <div className="row"><Link className="btn sm primary" href={`/run/?id=${r.id}`}>Take over</Link>{r.paused?.stops_in_s != null && <span className="small muted">stops by itself in about {Math.max(1, Math.ceil(r.paused.stops_in_s / 60))} min</span>}</div>
+              </article>))}</div>))}
           {tab === "approvals" && (d.approvals.length === 0 ? <div className="card"><Empty title="No approvals waiting" /></div> : (
             <div className="stack">{d.approvals.map((a) => (
               <article key={a.run_id} className="card card-pad stack" style={{ gap: 12 }}>

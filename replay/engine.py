@@ -252,7 +252,7 @@ class ReplayEngine:
                         self.session_manager.pause(reason="all steps completed but success_checkpoint was not met", step_id=None)
                     except SessionCancelled as sc:
                         self._escalated = True
-                        raise _HardFailure(ReplayError(message=sc.reason), completed) from None
+                        raise _HardFailure(ReplayError(message=sc.reason, code=sc.code), completed) from None
                     self._escalated = True
                     if not self.surface.check_signal(substitute_signal(artifact.success_checkpoint, variables)):
                         raise _HardFailure(ReplayError(message="success_checkpoint still not met after human intervention", code="checkpoint_failed"), completed)
@@ -328,13 +328,13 @@ class ReplayEngine:
         # action needing confirmation) -- either way, the human can act on the SAME live
         # session (including performing the exact blocked action with the confirmed checkbox)
         # via the operator console, then resume.
-        if self.session_manager is not None and depth == 0:
+        if self.session_manager is not None and depth == 0 and (code != "blocked" or self.session_manager.pause_on_blocked):
             self.session_manager.update_observed(self.surface.perceive())
             try:
                 self.session_manager.pause(reason=failure_message, step_id=step.step_id)
             except SessionCancelled as sc:
                 self._escalated = True
-                raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason, code="cancelled"), completed_so_far) from None
+                raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason, code=sc.code), completed_so_far) from None
             self._escalated = True
 
             # Don't blindly redo the original action on resume -- the human may already have

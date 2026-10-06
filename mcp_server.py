@@ -121,7 +121,9 @@ class Bridge:
         if target is None:
             return self._error(f"no target is configured for the '{cap['app']}' system")
         headers = {"Idempotency-Key": key} if key else {}
-        response = await self.http.post("/v1/runs", json={"capability_id": cap["capability_id"], "params": arguments, "target": target, "dry_run": dry_run}, headers=headers)
+        # pause_for_human is false: an assistant cannot take over a run, so if it gets stuck it should fail at once
+        response = await self.http.post("/v1/runs", json={"capability_id": cap["capability_id"], "params": arguments, "target": target, "dry_run": dry_run,
+                                                          "pause_for_human": False}, headers=headers)
         self._raise(response)
         body = response.json()
         deadline = time.monotonic() + self.wait_seconds

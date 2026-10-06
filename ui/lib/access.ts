@@ -23,11 +23,12 @@ export function mayDecideApproval(role: Role | undefined, name: string | undefin
 }
 
 /** How many inbox items this person can act on right now, so the badge never counts things they cannot do anything about. */
-export function actionableCount(inbox: { approvals: PendingApproval[]; needs_review: RunView[]; repairs: RepairItemLite[]; discovery_commits?: unknown[] } | null | undefined, me: { name: string; role: Role } | null): number {
+export function actionableCount(inbox: { approvals: PendingApproval[]; needs_review: RunView[]; repairs: RepairItemLite[]; discovery_commits?: unknown[]; paused?: unknown[] } | null | undefined, me: { name: string; role: Role } | null): number {
   if (!inbox || !me) return 0;
   const approvals = inbox.approvals.filter((a) => mayDecideApproval(me.role, me.name, a.tier, a.requested_by)).length;
   const review = atLeast(me.role, "operator") ? inbox.needs_review.length : 0;
   const repairs = inbox.repairs.filter((r) => r.confident && atLeast(me.role, r.touches_irreversible_step ? "supervisor" : "operator")).length;
   const discovery = atLeast(me.role, "supervisor") ? (inbox.discovery_commits?.length ?? 0) : 0;
-  return approvals + review + repairs + discovery;
+  const waiting = atLeast(me.role, "operator") ? (inbox.paused?.length ?? 0) : 0;
+  return approvals + review + repairs + discovery + waiting;
 }

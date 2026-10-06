@@ -19,6 +19,9 @@ export default function Policy() {
             <td>{Object.keys(c.caps.max_param).length ? Object.entries(c.caps.max_param).map(([k, v]) => `${label(k)} ≤ ${v}`).join(", ") : <span className="muted">no limit</span>}</td><td className="num">{c.caps.max_commits_per_day ?? "—"}</td></tr>)}
         </tbody></table></div>
         <div className="card-body small muted">A capability not listed here defaults to <span className="tag">{d.default_approval}</span>{d.default_approval === "live" ? ": its irreversible step is blocked until a person confirms it during the run" : ": a task with an irreversible step waits for that kind of approval before it runs"}. Tasks discovered from the console land here, so a new task is never less guarded than the default.</div></section>
+      <section className="card"><div className="card-head"><h2>Stuck runs</h2></div><div className="card-body small">{d.escalation.enabled
+        ? <>A run that gets stuck pauses for a person to take over from the console, for up to <strong>{Math.round(d.escalation.wait_s / 60)} min</strong>, then stops. At most <strong>{d.escalation.max_paused}</strong> run{d.escalation.max_paused === 1 ? "" : "s"} may wait at once, because a waiting run holds a browser. AI assistants always fail at once instead.</>
+        : <>Switched off: a run that gets stuck fails at once.</>}</div></section>
       <div className="grid-2">
         <section className="card"><div className="card-head"><h2>People who may approve</h2></div><div className="card-body">
           <p className="small muted" style={{ marginBottom: 8 }}>Used by the command line. Over the API, your key's role decides.</p>
