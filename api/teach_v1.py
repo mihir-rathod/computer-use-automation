@@ -60,7 +60,7 @@ def _view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
         out["lint"] = json.loads(row["lint_json"]) if row.get("lint_json") else None
         out["commit_request"] = json.loads(row["commit_request_json"]) if row.get("commit_request_json") else None
         out["turns"] = turns.build(Path(row["evidence_dir"]) if row.get("evidence_dir") else None)
-        out["draft_url"] = f"/capabilities/?id={row['capability_id']}&version={row['version']}" if row.get("version") and status in ("ready", "needs_attention", "promoted") else None
+        out["draft_url"] = f"/artifact/?id={row['capability_id']}&version={row['version']}" if row.get("version") and status in ("ready", "needs_attention", "promoted") else None
     return out
 
 

@@ -19,9 +19,9 @@ from safety.allowlist import AllowlistConfig, AllowlistPolicy
 from safety.policy import SafetyPolicy
 from surface.base import Action
 from surface.web import WebSurface
-from tests.conftest import login
+from tests.conftest import FIXTURE_ARTIFACTS, login
 
-ARTIFACT = load_artifact_by_id("mockbank.open_subaccount")
+ARTIFACT = load_artifact_by_id("mockbank.open_subaccount", FIXTURE_ARTIFACTS)
 
 
 def _safety_policy(base_url: str) -> SafetyPolicy:

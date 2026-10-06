@@ -27,7 +27,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from mockbank import data
+from tests.support.mockbank import data
 
 app = FastAPI(title="MockBank")
 

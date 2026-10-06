@@ -201,7 +201,7 @@ class CapabilityTarget(BaseModel):
 class Preconditions(BaseModel):
     requires_capability: str | None = Field(
         default=None,
-        description="e.g. 'mockbank.login' -- models auth as its own reusable capability "
+        description="e.g. 'clinic.login' -- models auth as its own reusable capability "
                      "instead of duplicating login steps in every flow.",
     )
     note: str | None = None
@@ -353,7 +353,7 @@ class Artifact(BaseModel):
                      "artifacts as the schema evolves. Distinct from `version`, which is this "
                      "capability's own recorded-flow version.",
     )
-    capability_id: str = Field(description="'<app_id>.<name>', e.g. 'mockbank.member_balance_lookup'.")
+    capability_id: str = Field(description="'<app_id>.<name>', e.g. 'clinic.patient_lookup'.")
     version: str = Field(description="Semver of this capability's recorded flow, e.g. '1.0.0'.")
     name: str
     description: str

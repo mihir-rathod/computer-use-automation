@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
-DEFAULT_ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist.json"
+DEFAULT_ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist_clinic.json"
 
 
 class AllowlistViolation(Exception):

@@ -16,14 +16,45 @@ from pydantic import BaseModel, Field
 
 import observability
 import runtime
-from api.chatbot import _check_arguments, _function_name, _json_type_to_gemini
 from api.v1 import Principal, adir, executor, require, run_view
 from artifacts_lib import storage
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
+_JSON_TO_GEMINI_TYPE = {"string": "STRING", "number": "NUMBER", "integer": "INTEGER", "boolean": "BOOLEAN"}
+# What a model writes when it has no value and fills the field anyway. Found live: asked to change only a phone number, it filled email and address with "unknown".
+_PLACEHOLDERS = {"unknown", "n/a", "na", "none", "null", "tbd", "not provided", "not specified", "unspecified", "?", "-", "--", "placeholder", "example", "test"}
+
+
+def _function_name(capability_id: str) -> str:
+    """Gemini function names can't contain '.', which every capability_id has."""
+    return capability_id.replace(".", "__")
+
+
+def _json_type_to_gemini(prop_type: Any) -> str:
+    if isinstance(prop_type, list):
+        prop_type = next((t for t in prop_type if t != "null"), "string")
+    return _JSON_TO_GEMINI_TYPE.get(prop_type, "STRING")
+
+
+def _check_arguments(artifact: Any, args: dict[str, Any], message: str) -> str | None:
+    """Returns a plain-language question when the model's arguments cannot be trusted, else None: required values missing, placeholder words standing in for
+    values, or anything the capability's own input schema rejects."""
+    from replay.validation import validate_input
+
+    missing = [f for f in artifact.input_schema.required if f not in args or args[f] in (None, "")]
+    invented = [k for k, v in args.items() if isinstance(v, str) and v.strip().lower() in _PLACEHOLDERS]
+    if missing or invented:
+        needed = missing + invented
+        return (f"To {artifact.name.lower()} I still need: {', '.join(needed)}. "
+                "Please include the exact value(s) in your message; I won't guess at them.")
+    problems = validate_input(artifact.input_schema, args)
+    if problems:
+        return f"I can't run {artifact.name.lower()} with that: {'; '.join(problems)}."
+    return None
+
 SYSTEM_INSTRUCTION = (
-    "You are the assistant inside an operations console for back-office systems (a credit-union core and a clinic's front desk and billing). "
+    "You are the assistant inside an operations console for back-office systems (a clinic's front desk and billing). "
     "Each tool is one recorded, reviewed task. Call exactly one tool when the user asks for something a tool does, using only values the user "
     "actually gave (or that follow unambiguously from the conversation). If a required value is missing, do NOT call a tool: ask for exactly what "
     "is missing. Never invent, default or guess a value; never write words like 'unknown' or 'n/a' as a value. If nothing matches the request, say so "
@@ -41,10 +72,9 @@ def get_client() -> Any:
 
 def build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
     declarations, by_name = [], {}
-    hidden = runtime.hidden_apps()
     for artifact in storage.list_artifacts(adir()):
-        if artifact.preconditions is None or artifact.target.app_id in hidden:
-            continue  # sign-on is plumbing, and a hidden system is not offered in the console
+        if artifact.preconditions is None:
+            continue  # sign-on is plumbing
         props = {n: types.Schema(type=_json_type_to_gemini(p.get("type")), description=p.get("description")) for n, p in artifact.input_schema.properties.items()}
         note = " Changes data." if artifact.safety.risk_level.value == "state_changing" else " Read-only."
         declarations.append(types.FunctionDeclaration(name=_function_name(artifact.capability_id), description=f"{artifact.description}{note} (system: {artifact.target.app_id})",

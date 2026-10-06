@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import runtime
-from api import chatbot
+from api import chat_v1
 from artifacts_lib.storage import load_artifact_by_id
 from replay.result import ReplayStatus
 from replay.validation import validate_input
@@ -52,25 +52,17 @@ def test_selecting_an_option_that_does_not_exist_says_what_is_offered_and_is_qui
     assert time.monotonic() - started < 6
 
 
-# ---- chatbot argument guard ---------------------------------------------------------------------
+# ---- chat argument guard ---------------------------------------------------------------------
 
-def test_chatbot_refuses_placeholder_values_the_model_invented():
+def test_chat_refuses_placeholder_values_the_model_invented():
     """Found live: asked to change only a phone number, the model filled email and address with 'unknown'."""
     artifact = load_artifact_by_id("clinic.update_patient_contact")
-    question = chatbot._check_arguments(artifact, {"mrn": "LK-100002", "phone": "206-555-0188", "email": "unknown", "address": "Unknown"}, "update phone")
+    question = chat_v1._check_arguments(artifact, {"mrn": "LK-100002", "phone": "206-555-0188", "email": "unknown", "address": "Unknown"}, "update phone")
     assert question and "email" in question and "address" in question and "won't guess" in question
 
 
-def test_chatbot_asks_for_missing_required_values_and_rejects_invalid_ones():
+def test_chat_asks_for_missing_required_values_and_rejects_invalid_ones():
     artifact = load_artifact_by_id("clinic.issue_refund")
-    assert "amount" in chatbot._check_arguments(artifact, {"invoice": "INV-30001", "reason": "billing_error"}, "refund")
-    assert "must be one of" in chatbot._check_arguments(artifact, {"invoice": "INV-30001", "amount": "5.00", "reason": "vibes"}, "refund")
-    assert chatbot._check_arguments(artifact, {"invoice": "INV-30001", "amount": "5.00", "reason": "billing_error"}, "refund") is None
-
-
-def test_chat_page_lists_the_real_capabilities_not_a_stale_table(monkeypatch):
-    rows = {r["name"]: r for r in chatbot._capability_summary()}
-    assert "Issue a refund on an invoice" in rows and "invoice" in rows["Issue a refund on an invoice"]["required"]
-    assert not any("transfer" in n.lower() or "hold" in n.lower() for n in rows)  # leftovers from the previous target
-    template = (chatbot.TEMPLATES_DIR / "chat.html").read_text() if hasattr(chatbot, "TEMPLATES_DIR") else open("api/templates/chat.html").read()
-    assert "Funds transfer" not in template and "Place hold" not in template
+    assert "amount" in chat_v1._check_arguments(artifact, {"invoice": "INV-30001", "reason": "billing_error"}, "refund")
+    assert "must be one of" in chat_v1._check_arguments(artifact, {"invoice": "INV-30001", "amount": "5.00", "reason": "vibes"}, "refund")
+    assert chat_v1._check_arguments(artifact, {"invoice": "INV-30001", "amount": "5.00", "reason": "billing_error"}, "refund") is None

@@ -14,7 +14,7 @@ from artifacts_lib.storage import (
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mockbank.member_balance_lookup.json"
-REAL_OPEN = Path(__file__).resolve().parent.parent / "artifacts" / "mockbank.open_subaccount"
+REAL_OPEN = Path(__file__).parent / "fixtures" / "artifacts" / "mockbank.open_subaccount"
 
 
 def base() -> Artifact:
@@ -87,7 +87,7 @@ def test_flat_layout_is_read_and_can_be_migrated(tmp_path):
 def test_a_clean_real_artifact_has_no_errors():
     from artifacts_lib.storage import DEFAULT_ARTIFACTS_DIR
 
-    findings = lint_artifact(load_artifact_by_id("mockbank.open_subaccount", DEFAULT_ARTIFACTS_DIR))
+    findings = lint_artifact(load_artifact_by_id("clinic.issue_refund", DEFAULT_ARTIFACTS_DIR))
     assert not has_errors(findings), [str(f) for f in findings]
 
 

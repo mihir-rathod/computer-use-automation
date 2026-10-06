@@ -27,8 +27,6 @@ teaching:
   commit_wait_s: 900
 
 capabilities:
-  mockbank.open_subaccount:
-    approval: live          # the original demo: confirmed live on the operator console during the run
   clinic.issue_refund:
     approval: supervisor
     caps:

@@ -108,7 +108,7 @@ def test_the_form_checks_input_before_anything_is_sent_and_says_what_is_wrong(pa
     page.get_by_label("Reason").select_option("billing_error")
     page.get_by_role("button", name="Submit for supervisor approval").click()
     expect(page.get_by_text("Doesn't match the expected format, e.g. INV-00000")).to_be_visible()
-    assert effects(console.clinic, "refund.request_approval") == [] and httpx.get(f"{console.base}/capabilities").status_code == 200
+    assert effects(console.clinic, "refund.request_approval") == [] and httpx.get(f"{console.base}/v1/health").status_code == 200
 
 
 def test_a_read_runs_live_and_shows_steps_with_screenshots(page, console):

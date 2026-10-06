@@ -31,8 +31,7 @@ curl -s -X POST localhost:8020/v1/runs/RUN_ID/approve -H "Authorization: Bearer 
 
 Other endpoints: `/v1/capabilities` (schemas, risk metadata, policy tier, canary state), `/v1/approvals`, `/v1/runs/{id}/cancel|reject|resolve`,
 `/v1/repairs`, `/v1/artifacts/{id}/versions|diff|promote|rollback`, `/v1/targets`, `/v1/me`, `/v1/health`. The caller never supplies a
-URL or credentials; the target profile decides. The older `POST /capabilities/{id}/invoke` (used by the chatbot and dashboard until
-the unified UI replaces them) is unauthenticated and synchronous, and now refuses URL, credential and evidence-path overrides.
+URL or credentials; the target profile decides. There is no other way in: the older unauthenticated, synchronous `/capabilities/{id}/invoke`, with its own chat page and dashboard, was removed (it is on the `mockbank` branch).
 
 **Partial updates.** An update capability can mark individual fields optional (`when_present` steps and `at_least_one_of` inputs):
 `clinic.update_patient_contact` takes an MRN plus any of phone, email, address, and leaves the fields you do not send exactly as they were.
@@ -84,7 +83,7 @@ Claude Desktop (`claude_desktop_config.json`); the API server and the target mus
 ```
 
 Only the stdio transport is implemented. `CUA_WAIT_SECONDS` (default 60) is how long a call waits for a run before returning its run id, and
-`CUA_TARGETS` maps a system to a target profile (default `{"clinic": "clinic", "mockbank": "mockbank"}`).
+`CUA_TARGETS` maps a system to a target profile (default `{"clinic": "clinic"}`).
 
 ## Operating the clinic capabilities
 

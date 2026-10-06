@@ -65,19 +65,6 @@ DEFAULT_RUN_TIMEOUT_S = 120.0
 # selects one; any of base_url/username/password/allowlist still overrides its piece explicitly.
 ALLOWLIST_DIR = DEFAULT_ALLOWLIST_PATH.parent
 TARGET_PROFILES: dict[str, dict[str, Any]] = {
-    "mockbank": {
-        "base_url": os.environ.get("MOCKBANK_BASE_URL", "http://localhost:8000"),
-        "username": "operator",
-        "password": "bankdemo123",
-        "allowlist": DEFAULT_ALLOWLIST_PATH,
-        "login_capability": "mockbank.login",
-        "login_path": "/login",
-        "home_path": "/search",
-        "sandbox": True,
-        "app_id": "mockbank",
-        # The original sample target, kept for the CLI, the tests and MCP. The console does not offer it: the clinic is the target this project ships.
-        "hidden": True,
-    },
     # Larkspur Clinic Ops (the legacy skin). Sandbox: a seeded demo clinic whose data resets on demand.
     "clinic": {
         "base_url": os.environ.get("CLINIC_BASE_URL", "http://localhost:8100"),
@@ -103,14 +90,6 @@ TARGET_PROFILES: dict[str, dict[str, Any]] = {
         "app_id": "clinic",
     },
 }
-
-
-def hidden_apps() -> set[str]:
-    """Apps the console leaves out: every profile for the app is marked hidden. They still work from the CLI, the API by name and MCP."""
-    apps: dict[str, bool] = {}
-    for profile in TARGET_PROFILES.values():
-        apps[profile["app_id"]] = apps.get(profile["app_id"], True) and bool(profile.get("hidden"))
-    return {app for app, hidden in apps.items() if hidden}
 
 
 def resolve_target(
@@ -167,7 +146,7 @@ def try_login(surface: WebSurface, username: str, password: str, login_capabilit
     return login_artifact, ReplayEngine(surface).run(login_artifact, {"username": username, "password": password})
 
 
-def run_login(surface: WebSurface, username: str, password: str, login_capability: str = "mockbank.login", artifacts_dir: Path | None = None) -> None:
+def run_login(surface: WebSurface, username: str, password: str, login_capability: str = "clinic.login", artifacts_dir: Path | None = None) -> None:
     login_artifact = load_artifact_by_id(login_capability, **({"directory": artifacts_dir} if artifacts_dir else {}))
     result = ReplayEngine(surface).run(login_artifact, {"username": username, "password": password})
     if result.status != ReplayStatus.SUCCESS:
@@ -179,7 +158,9 @@ def run_id(prefix: str) -> str:
 
 
 def _dir_kw(artifacts_dir: Path | None) -> dict[str, Any]:
-    return {"directory": artifacts_dir} if artifacts_dir else {}
+    """An explicit folder wins; otherwise ARTIFACTS_DIR (the same override the API honours); otherwise the default."""
+    chosen = artifacts_dir or (Path(os.environ["ARTIFACTS_DIR"]) if os.environ.get("ARTIFACTS_DIR") else None)
+    return {"directory": chosen} if chosen else {}
 
 
 def default_store() -> RunStore:
@@ -228,7 +209,7 @@ def prepare_run(
     capability_id: str,
     params: dict[str, Any],
     *,
-    target: str | None = "mockbank",
+    target: str | None = "clinic",
     base_url: str | None = None,
     username: str | None = None,
     password: str | None = None,
@@ -278,7 +259,7 @@ def prepare_run(
         # An approval is for a specific identity: resuming as a different target account would run it as someone else.
         if run["target"] and target not in (None, run["target"]):
             raise ValueError(f"run {resume_run_id} was requested for target '{run['target']}', not '{target}'")
-        target = run["target"] or target or "mockbank"
+        target = run["target"] or target or "clinic"
         capability_id, params = run["capability_id"], json.loads(run["params_json"])
         pace_ms, show_window = int(run.get("pace_ms") or 0), bool(run.get("show_window"))  # watching was asked for at submit time
         artifact = load_artifact_by_id(capability_id, **_dir_kw(artifacts_dir), version=run["version"])
@@ -296,7 +277,7 @@ def prepare_run(
         if problems:
             observability.log("run.refused", code="input_invalid", capability_id=capability_id, requested_by=requested_by, problems=len(problems))
             return Early(_early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(message="; ".join(problems), code="input_invalid")), evidence_dir)
-        profile_app = TARGET_PROFILES.get(target or "mockbank", {}).get("app_id")
+        profile_app = TARGET_PROFILES.get(target or "clinic", {}).get("app_id")
         if profile_app and artifact.target.app_id != profile_app:
             early = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
                 code="target_mismatch", message=f"{capability_id} is a {artifact.target.app_id} capability but target '{target}' is a {profile_app} app"))
@@ -400,7 +381,7 @@ def _explain_runner_error(exc: Exception, target: str | None, base_url: str | No
     text = str(exc)
     if any(marker in text for marker in _UNREACHABLE):
         try:
-            where = resolve_target(target or "mockbank", base_url)["base_url"]
+            where = resolve_target(target or "clinic", base_url)["base_url"]
         except Exception:  # noqa: BLE001
             where = base_url or "the target system"
         return ReplayError(code="target_unreachable", message=f"Couldn't reach {where}. The system may not be running, or its address may be wrong. Nothing was changed; try again once it is up.")

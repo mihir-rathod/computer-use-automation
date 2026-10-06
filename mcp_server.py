@@ -41,7 +41,7 @@ class Bridge:
 
     def __init__(self, api_url: str, api_key: str, targets: dict[str, str] | None = None, wait_seconds: float = 60.0,
                  client: httpx.AsyncClient | None = None):
-        self.targets = targets or {"clinic": "clinic", "mockbank": "mockbank"}
+        self.targets = targets or {"clinic": "clinic"}
         self.wait_seconds = wait_seconds
         self.http = client or httpx.AsyncClient(base_url=api_url.rstrip("/"), headers={"Authorization": f"Bearer {api_key}"}, timeout=30.0)
         self._catalog: dict[str, dict[str, Any]] = {}

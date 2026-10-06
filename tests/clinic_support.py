@@ -37,7 +37,7 @@ def copy_artifacts(dst) -> "Path":
 
     src = Path(__file__).resolve().parent.parent / "artifacts"
     out = Path(dst) / "artifacts"
-    shutil.copytree(src, out, ignore=shutil.ignore_patterns("mockbank.*"))
+    shutil.copytree(src, out)
     for folder in out.iterdir():
         index = json.loads((folder / "index.json").read_text())
         for version_file in folder.glob("*.json"):

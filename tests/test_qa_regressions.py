@@ -13,6 +13,8 @@ from runs.approvals import decide_run, resolve_run
 from runs.store import ApprovalError
 from safety.config import PolicyConfig
 
+pytestmark = pytest.mark.usefixtures("mockbank_runtime")  # these run MockBank artifacts through the runtime; see conftest
+
 
 def fake_browser(monkeypatch, delay=0.0):
     calls = []
@@ -140,16 +142,6 @@ def test_a_capability_cannot_be_run_against_the_wrong_app(monkeypatch):
     calls = fake_browser(monkeypatch)
     res, _ = runtime.run_replay("mockbank.member_balance_lookup", {"member_id": "10001"}, target="clinic", enable_operator_console=False)
     assert res.error.code == "target_mismatch" and calls == []
-
-
-def test_dashboard_shows_a_pending_approval_as_pending_not_running(tmp_path):
-    from api.dashboard import _parse_run
-
-    first, evidence = runtime.run_replay("clinic.issue_refund", REFUND, target="clinic", requested_by="alex",
-                                         enable_operator_console=False, evidence_dir=tmp_path / "ev")
-    assert first.status == ReplayStatus.PENDING_APPROVAL
-    summary = _parse_run(evidence)
-    assert summary["status"] == "pending_approval"
 
 
 def test_approval_error_grammar():

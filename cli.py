@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """CLI entry point. See README.md for usage; these are the commands it implements.
 
-    uv run python cli.py discover --capability mockbank.member_balance_lookup --param member_id=10001
-    uv run python cli.py replay    --capability mockbank.member_balance_lookup --param member_id=10002
+    uv run python cli.py discover --capability clinic.patient_lookup --target clinic --param mrn=LK-100001
+    uv run python cli.py replay    --capability clinic.patient_lookup --target clinic --param mrn=LK-100002
 
 Both commands log in first (via the target's own login capability, replayed like any other
 capability -- login is a first-class reusable capability, not special-cased CLI logic) and
@@ -406,9 +406,9 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     discover_p = sub.add_parser("discover", help="Run LLM-driven discovery and save the resulting artifact")
-    discover_p.add_argument("--capability", required=True, help="capability_id from agent/catalog.py, e.g. mockbank.member_balance_lookup")
+    discover_p.add_argument("--capability", required=True, help="capability_id from agent/catalog.py, e.g. clinic.patient_lookup")
     discover_p.add_argument("--param", action="append", default=[], help="key=value, repeatable")
-    discover_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="mockbank", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
+    discover_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="clinic", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
     discover_p.add_argument("--base-url", default=None, help="override the --target profile's base_url")
     discover_p.add_argument("--username", default=None, help="override the --target profile's username")
     discover_p.add_argument("--password", default=None, help="override the --target profile's password")
@@ -431,7 +431,7 @@ def main() -> int:
     replay_p.add_argument("--param", action="append", default=[], help="key=value, repeatable")
     replay_p.add_argument("--operator-port", type=int, default=8010)
     replay_p.add_argument("--no-operator-console", action="store_true", help="disable escalation -- a hard failure just fails instead of pausing for a human")
-    replay_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="mockbank", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
+    replay_p.add_argument("--target", choices=sorted(TARGET_PROFILES), default="clinic", help="which TARGET_PROFILES entry to use for base-url/credentials/allowlist/login")
     replay_p.add_argument("--base-url", default=None, help="override the --target profile's base_url")
     replay_p.add_argument("--username", default=None, help="override the --target profile's username")
     replay_p.add_argument("--password", default=None, help="override the --target profile's password")

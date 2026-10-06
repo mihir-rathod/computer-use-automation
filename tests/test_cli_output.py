@@ -10,8 +10,8 @@ from replay.result import ReplayResult, ReplayStatus
 
 
 def args(**kw):
-    base = dict(capability="mockbank.member_balance_lookup", param=["member_id=10001"], evidence_dir=None, no_operator_console=True, operator_port=8010,
-                resume=None, target="mockbank", base_url=None, username=None, password=None, allowlist=None, headed=False, slow_mo=0,
+    base = dict(capability="clinic.patient_lookup", param=["mrn=LK-100001"], evidence_dir=None, no_operator_console=True, operator_port=8010,
+                resume=None, target="clinic", base_url=None, username=None, password=None, allowlist=None, headed=False, slow_mo=0,
                 dry_run=False, timeout=5, idempotency_key=None, requested_by="t", repair_llm=False)
     return argparse.Namespace(**{**base, **kw})
 

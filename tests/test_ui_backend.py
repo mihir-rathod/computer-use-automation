@@ -223,19 +223,3 @@ def test_a_sign_on_failure_is_not_blamed_on_the_tasks_own_steps(api, clinic_base
     assert tl["sign_on"]["status"] == "failed" and tl["sign_on"]["capability_id"] == "clinic.login" and tl["sign_on"]["screenshot"]
     assert {s["status"] for s in tl["steps"]} == {"not_run"}  # none of the task's own steps ran, and none is blamed
     assert all(s["screenshot"] is None for s in tl["steps"])
-
-
-def test_the_console_does_not_offer_the_original_sample_target(api, monkeypatch):
-    """MockBank is kept for the CLI, tests and MCP, but the console shows the clinic only: tasks, systems to run against, discovery and chat."""
-    from pathlib import Path
-    monkeypatch.setenv("ARTIFACTS_DIR", str(Path(__file__).resolve().parent.parent / "artifacts"))  # the real folder, which has the mockbank artifacts the test copies leave out
-    assert any(a.capability_id.startswith("mockbank.") for a in __import__("artifacts_lib.storage", fromlist=["x"]).list_artifacts(Path(__file__).resolve().parent.parent / "artifacts"))
-    caps = {c["capability_id"] for c in api.get("/v1/capabilities", headers=api.h("vic")).json()["capabilities"]}
-    assert caps and all(not c.startswith("mockbank.") for c in caps) and "clinic.patient_lookup" in caps
-    assert {t["app"] for t in api.get("/v1/targets", headers=api.h("vic")).json()["targets"]} == {"clinic"}
-    assert {t["name"] for t in api.get("/v1/teach/options", headers=api.h("dana")).json()["targets"]} == {"clinic", "clinic_supervisor"}
-    from api import chat_v1
-    assert all(not name.startswith("mockbank") for name in chat_v1.build_tools()[1])
-    assert not any(k.startswith("mockbank.") for k in api.get("/v1/policy", headers=api.h("alex")).json()["capabilities"])
-    # still there for whoever asks for it by name
-    assert api.get("/v1/capabilities/mockbank.member_balance_lookup", headers=api.h("vic")).status_code == 200

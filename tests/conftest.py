@@ -12,6 +12,7 @@ import socket
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 # Before anything imports the app: session-scoped fixtures (the in-process API server) start before any per-test fixture and would
 # otherwise run their startup recovery against the developer's real run database (data/runs.db).
@@ -22,7 +23,7 @@ import pytest
 import uvicorn
 from dotenv import load_dotenv
 
-from mockbank.app import app as mockbank_app
+from tests.support.mockbank.app import app as mockbank_app
 
 # So GEMINI_API_KEY (and anything else in .env) is visible the same way for `pytest` as for
 # the `discover`/`replay` CLI -- without this, tests/test_discovery_live.py would always
@@ -34,7 +35,6 @@ load_dotenv()
 def _isolated_run_store(tmp_path, monkeypatch):
     """Every test gets its own run database, so runs recorded by one never dedupe or cap another."""
     monkeypatch.setenv("RUN_DB_PATH", str(tmp_path / "runs.db"))
-    monkeypatch.setenv("ALLOW_TARGET_OVERRIDE", "1")  # the legacy API refuses base_url/credential overrides unless this is set
 
 
 def _free_port() -> int:
@@ -68,11 +68,40 @@ def mockbank_base_url():
     thread.join(timeout=5)
 
 
+FIXTURE_ARTIFACTS = Path(__file__).parent / "fixtures" / "artifacts"      # the hand-written MockBank artifacts the engine and runtime tests replay
+MOCKBANK_ALLOWLIST = Path(__file__).parent / "support" / "mockbank" / "allowlist.json"
+
+
+@pytest.fixture
+def mockbank_runtime(tmp_path, monkeypatch, mockbank_base_url):
+    """Lets the runtime run MockBank, a small test-only site that is not part of the product: a target profile for it, and its artifacts beside the clinic's.
+    Used by the tests that exercise the runtime's own rules (idempotency, caps, approvals) with a browser that is faked or very fast."""
+    import shutil
+
+    import runtime
+    from tests.clinic_support import copy_artifacts
+
+    artifacts = copy_artifacts(tmp_path)
+    shutil.copytree(FIXTURE_ARTIFACTS, artifacts, dirs_exist_ok=True)
+    monkeypatch.setenv("ARTIFACTS_DIR", str(artifacts))
+    monkeypatch.setitem(runtime.TARGET_PROFILES, "mockbank", {
+        "base_url": mockbank_base_url, "username": "operator", "password": "bankdemo123", "allowlist": MOCKBANK_ALLOWLIST,
+        "login_capability": "mockbank.login", "login_path": "/login", "home_path": "/search", "sandbox": True, "app_id": "mockbank"})
+
+    real_run = runtime.run_replay
+
+    def run_replay(capability_id, params, **kw):
+        if capability_id.startswith("mockbank.") and "target" not in kw:
+            kw["target"] = "mockbank"  # the default target is the clinic; a MockBank capability belongs to its own
+        return real_run(capability_id, params, **kw)
+
+    monkeypatch.setattr(runtime, "run_replay", run_replay)
+    return artifacts
+
+
 @pytest.fixture(scope="session")
 def api_base_url():
-    """Same pattern as mockbank_base_url -- the capability API in-process on a free port, for
-    tests that need a real server (e.g. the chatbot's self-call to its own /invoke endpoint,
-    which is a genuine HTTP round-trip, not a direct function call -- see api/chatbot.py)."""
+    """The platform API in-process on a free port, for tests that need a real server: the console's browser tests and the MCP bridge, both of which make real HTTP calls."""
     from api.app import app as api_app
 
     port = _free_port()
@@ -85,7 +114,7 @@ def api_base_url():
     deadline = time.time() + 5
     while time.time() < deadline:
         try:
-            httpx.get(f"{base_url}/capabilities", timeout=0.5)
+            httpx.get(f"{base_url}/v1/health", timeout=0.5)
             break
         except httpx.ConnectError:
             time.sleep(0.1)

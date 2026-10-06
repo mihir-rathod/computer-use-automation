@@ -15,6 +15,8 @@ from replay.result import ReplayError, ReplayResult, ReplayStatus
 from runs.store import ABANDONED, APPROVED, PENDING_APPROVAL, ApprovalError, RunError, RunStore
 from safety.config import PolicyConfig, check_params, may_approve, required_approval
 
+pytestmark = pytest.mark.usefixtures("mockbank_runtime")  # these run MockBank artifacts through the runtime; see conftest
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

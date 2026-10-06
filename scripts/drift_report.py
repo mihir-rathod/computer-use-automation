@@ -53,7 +53,7 @@ def one(cap: str, level: int, tmp: Path) -> dict:
     httpx.post(f"{BASE}/_test/chaos/duplicate-guard", json={"enabled": False}, timeout=5)
     httpx.post(f"{BASE}/_test/drift", json={"level": level, "seed": f"d{level}"}, timeout=5)
     arts = tmp / f"{cap}-{level}"
-    shutil.copytree(REPO / "artifacts", arts, ignore=shutil.ignore_patterns("mockbank.*"))
+    shutil.copytree(REPO / "artifacts", arts)
     store, policy = runtime.default_store(), PolicyConfig.load()
     row = {"capability": cap, "level": level, "repairs": 0, "confident": 0, "unconfident": 0, "outcome": "?", "effects": None, "repaired_steps": []}
     for round_ in range(MAX_ROUNDS):

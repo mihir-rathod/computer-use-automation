@@ -29,7 +29,7 @@ escalation/ SessionManager (pause / take over / resume) + operator console
 runs/       RunStore: runs, idempotency keys, approvals, repair proposals, canary history (SQLite)
 repair/     locator repair proposals (heuristic, optional LLM ranker) and their approval
 canary.py   scheduled read-only replays
-runtime.py  run_replay(): the one path CLI, API and chatbot all call
+runtime.py  run_replay(): the one path CLI, API, console, chat and MCP all call
             policy caps -> idempotency -> approval -> browser pool -> engine -> run record
 ```
 
@@ -240,12 +240,23 @@ the moment it was saved. Discovered versions are saved with `make_current=False`
 task list, refused by `load_artifact_by_id`, and can be opened by version for review or deleted. Promotion is the existing path.
 
 **Unlisted capabilities default to `supervisor`, not `live`.** The old default (`live`: confirm on the operator console mid-run) assumed a person at the console. A task
-nobody has configured now needs a recorded supervisor approval before it runs if it commits something. `mockbank.open_subaccount` is listed explicitly as `live` to keep the
-demo as it was.
+nobody has configured now needs a recorded supervisor approval before it runs if it commits something.
 
 **One session at a time, on its own thread.** The model's quota is shared and a person is watching, so a second session is refused with who has the first. The session runs
 on a daemon thread rather than the browser pool, so a long wait for an answer cannot starve ordinary runs or keep the server from stopping. A session left active by a
 dead process is marked failed at startup.
+
+## Removing the original sample target and the old API
+
+**Two front doors were left over from the first version.** The unauthenticated `POST /capabilities/{id}/invoke`, with its server-rendered chat page and run dashboard, took
+`requested_by` from the caller and ran tasks synchronously. Next to `/v1` (keys, roles, approvals, idempotency) it was a standing hole, and the console had replaced everything
+it did. They are gone; the chat's three helpers moved into `api/chat_v1.py`, and the chat now has a live-model test of its own.
+
+**MockBank is no longer part of the product.** It was the first, small sample target; the clinic is the one the project ships. Its profile, catalog entries, artifacts, allowlist and
+policy entry are removed, the CLI and MCP default to the clinic, and the `mockbank` branch keeps the whole earlier state. The engine, surface, safety and escalation tests ran
+against its small site because it was quick and had a terms modal, an unavailable page and session expiry that the clinic's legacy skin does not, so the site and its hand-written
+artifacts moved under `tests/support/` and `tests/fixtures/` as test-only fixtures instead of being rewritten (a rewrite would have dropped coverage of modal recovery for the same
+effort). A `mockbank_runtime` fixture registers a profile for it only in the tests that run it through the runtime.
 
 ## Decisions and why
 
@@ -285,7 +296,7 @@ drains them inside `pause()`, because Playwright's sync API is not safe across t
 escalates at most once. On resume the engine checks the step's checkpoint before redoing the
 action, so a human who already performed it is not double-submitted.
 
-**One execution path.** The CLI, the HTTP API and the chatbot all call `runtime.run_replay()`.
+**One execution path.** The CLI, the HTTP API, the console, the chat and MCP all call `runtime.run_replay()`.
 None of them reimplements it, so none of them can skip safety, evidence or escalation.
 
 ## Incidents
@@ -478,14 +489,11 @@ page) or the text of a checkpoint or business-outcome signal is not covered at a
 These are verified against the code as of this writing.
 
 - **Identity is authenticated on `/v1` only.** There, the API key supplies the name and role. The CLI still trusts the name you type
-  (checked against the roster in `safety/policy.yaml`), and the older `/capabilities/{id}/invoke`, the chatbot and the dashboard have no
-  authentication at all and take `requested_by` from the caller. They are replaced by the unified UI (phase 4), which will use `/v1`. Keys
-  are created from the CLI; there is no key rotation or expiry.
+  (checked against the roster in `safety/policy.yaml`). Keys are created from the CLI or the admin page; there is no key rotation or expiry.
 - **The supervised commit gate has not been used by a person at a keyboard.** It is a terminal prompt;
   it was run once live against Gemini with the answers piped in (the approver landed in the artifact's
   provenance) and is otherwise tested with an injected answer function. The checked-in clinic artifacts were recorded with
-  `auto_sandbox`, which only a profile marked `sandbox` permits. `mockbank.open_subaccount` is still
-  hand-written, and the `unreviewed` lint warning stands on every discovered artifact.
+  `auto_sandbox`, which only a profile marked `sandbox` permits. The `unreviewed` lint warning stands on every discovered artifact.
 - **Recording is only as good as the contract and the model.** All 8 clinic discoveries finished on
   their final attempt, but they were run repeatedly while platform bugs were being found (incidents 7
   to 11), so that is not a success rate. No benchmark of discovery cost or reliability exists yet.
@@ -533,11 +541,8 @@ These are verified against the code as of this writing.
   something that does not exist ends as a failure until a person adds one), the pattern on each input and one replay. A task whose success text also appears on a failure page
   would pass them, and a replay with its own example proves the recording stands alone, not that it works for other values. The recorded steps are reviewed on the artifact page, not edited there.
 - **A task discovered under `clinic_supervisor` records it as a clinic task.** It must then be run with that target; the console does not yet say so.
-- **The older API and the chat are still in-process and synchronous.** Chat history is one global list in memory (every visitor shares
-  it and a restart clears it), the page reloads itself while a run is pending, which discards a half-typed message, and the chatbot runs
-  every clinic task as the front-desk account. The operator console starts at import time on a fixed port. v1 has no rate limiting.
-- **The chatbot is minimal.** Gemini only, no conversation memory, one capability per message, a keyword guard for the credit-union
-  capabilities plus the new schema and placeholder check, and a server-rendered page that polls. It cannot approve a run it submits.
+- **The chat is minimal.** Gemini only, the last eight turns as memory, one capability per message, and a schema and placeholder check on every argument. It cannot
+  approve a run it submits. `/v1` has no rate limiting.
 - **Clinic coverage.** Capabilities target the legacy skin only; the modern skin, the CSV export and the
   approvals queue have no capability. Browser tests cover search, contact update, reschedule, cancel,
   CSV download, session expiry, drift, duplicate submit and maintenance; the claim, refund, write-off and

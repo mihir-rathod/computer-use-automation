@@ -256,12 +256,3 @@ def test_runs_left_running_by_a_dead_process_stop_blocking_their_key():
     assert store.get(commit)["error_code"] == "interrupted"
     assert store.begin("clinic.patient_lookup", "1.0.0", {"mrn": "LK-100001"}, "alex", "k-a").kind == "new"
     assert store.begin("clinic.issue_refund", "1.0.0", REFUND, "alex", "k-b").kind == "conflict"  # unsettled: stays blocked
-
-
-def test_the_old_endpoint_refuses_url_and_credential_overrides_unless_enabled(monkeypatch):
-    monkeypatch.delenv("ALLOW_TARGET_OVERRIDE", raising=False)
-    with TestClient(app) as c:
-        r = c.post("/capabilities/clinic.patient_lookup/invoke", json={"target": "clinic", "base_url": "http://example.com", "params": {"mrn": "LK-100001"}})
-        assert r.status_code == 422 and "cannot be supplied" in r.json()["detail"]
-        r = c.post("/capabilities/clinic.patient_lookup/invoke", json={"target": "clinic", "evidence_dir": "/tmp/elsewhere", "params": {"mrn": "LK-100001"}})
-        assert r.status_code == 422 and "evidence directory" in r.json()["detail"]

@@ -34,7 +34,7 @@ class GeminiClient:
     ) -> types.GenerateContentResponse:
         """`tool_choice` defaults to "ANY" (always call a tool) for the discovery loop's own
         needs -- every turn there must be some action or terminal call, never plain prose. The
-        chatbot (api/chatbot.py) is the other caller of this method and needs the opposite:
+        the chat (api/chat_v1.py) is the other caller of this method and needs the opposite:
         "AUTO", so the model can answer in plain text when nothing in the catalog actually
         matches. Found via a real bug: with mode="ANY" forced unconditionally, an out-of-scope
         chatbot message ("what's the weather like today") still got force-mapped onto the

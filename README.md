@@ -114,7 +114,7 @@ Approvals, repairs, canaries, keys and the rest are in [docs/reference.md](docs/
 | **Discovery and replay** | `agent/` (discovery loop, recorder, catalog) · `replay/` (engine) · `surface/` (Playwright, browser pool) · `artifacts_lib/` (schema, versions, lint, diff) · `teach/` (discovery from the console) |
 | **Safety and runs** | `safety/` (allowlist, risk, `policy.yaml`) · `runs/` (SQLite store, async executor) · `repair/` · `escalation/` · `evidence_lib/` |
 | **Interfaces** | `api/` (the `/v1` API) · `ui/` (web console, Next.js) · `mcp_server.py` · `cli.py` · `observability.py` |
-| **Practice systems** | `clinic/` (the target we ship: legacy and React skins, JSON API, audit log, chaos, drift) · `mockbank/` (the original small sample, hidden from the console) |
+| **Practice systems** | `clinic/` (the target we ship: legacy and React skins, JSON API, audit log, chaos, drift). The original MockBank sample, and the older chat and dashboard, live on the `mockbank` branch; the engine tests still use a small copy of the MockBank site under `tests/support/`. |
 | **Data** | `artifacts/` (one folder per task, every version) · `data/` (run database) · `evidence/` (screenshots, logs, traces) |
 | **Everything else** | `tests/` · `scripts/` · `docs/reference.md` · `WRITEUP.md` |
 

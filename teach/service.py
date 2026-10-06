@@ -63,8 +63,6 @@ def teachable_targets(policy: PolicyConfig) -> list[dict[str, Any]]:
     """Targets a task can be taught on. Sandboxes always; anything else only if the policy allows read-only teaching there."""
     out = []
     for name, profile in runtime.TARGET_PROFILES.items():
-        if profile.get("hidden"):
-            continue
         sandbox = bool(profile.get("sandbox"))
         if sandbox or policy.teaching.non_sandbox_read_only:
             out.append({"name": name, "app_id": profile["app_id"], "base_url": profile["base_url"], "sandbox": sandbox, "read_only_only": not sandbox})

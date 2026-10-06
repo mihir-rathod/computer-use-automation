@@ -373,8 +373,7 @@ def capability_view(artifact: Any, detail: bool = False) -> dict[str, Any]:
 
 @router.get("/capabilities")
 def capabilities(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
-    hidden = runtime.hidden_apps()
-    return {"capabilities": [capability_view(a) for a in storage.list_artifacts(adir()) if a.target.app_id not in hidden]}
+    return {"capabilities": [capability_view(a) for a in storage.list_artifacts(adir())]}
 
 
 @router.get("/capabilities/{capability_id}")
@@ -388,7 +387,7 @@ def capability(capability_id: str, version: str | None = None, _: Principal = De
 @router.get("/targets")
 def targets(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
     return {"targets": [{"name": n, "app": p.get("app_id"), "base_url": p["base_url"], "sandbox": bool(p.get("sandbox")),
-                         "signs_in_as": p["username"]} for n, p in runtime.TARGET_PROFILES.items() if not p.get("hidden")]}
+                         "signs_in_as": p["username"]} for n, p in runtime.TARGET_PROFILES.items()]}
 
 
 @router.get("/me")
@@ -416,7 +415,7 @@ def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
     p = runtime.default_policy()
     return {
         "approvers": p.approvers,
-        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items() if k.split(".")[0] not in runtime.hidden_apps()},
+        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
         "default_approval": p.default_approval, "teaching": p.teaching.model_dump(),
         "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
         "risk_keywords": p.risk_keywords.model_dump(),
