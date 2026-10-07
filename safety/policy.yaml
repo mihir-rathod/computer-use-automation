@@ -1,0 +1,83 @@
+# Safety policy. Loaded by safety/config.py; edit this file, not the code.
+#
+# approval: how an irreversible step of a capability gets authorised.
+#   live        (default) the step is blocked until a human confirms it on the operator console, mid-run.
+#   operator    a recorded approval from anyone on the roster below, other than the requester, before the run starts.
+#   supervisor  as above, but the approver must hold the supervisor role.
+# A capability with no irreversible step ignores this.
+#
+# Approver identity is asserted, not authenticated: the roster says who is allowed to approve, but nothing
+# yet proves the caller is that person. Real authentication arrives with API-key auth (Phase 3).
+version: 1
+
+approvers:
+  smooth.operator: operator
+  suzie.visor: supervisor
+
+# A capability not listed under `capabilities` that has an irreversible step needs this approval. A task discovered from the console lands here until you
+# give it an entry of its own (with amount caps, a different tier, ...).
+default_approval: supervisor
+
+# Discovering a new task from the console. A model drives a real browser and sees whatever the page shows, so by default it is limited to sandbox
+# targets. non_sandbox_read_only lets it discover read-only tasks on a real system; turn it on only after deciding what the model may see.
+discovery:
+  non_sandbox_read_only: false
+  max_steps: 25
+  timeout_s: 300
+  commit_wait_s: 900
+
+# A run that hits something unexpected (a screen that changed, a step that cannot be found) pauses for a person to take over from the console, instead of
+# failing. It holds a browser worker while it waits, so it is stopped after wait_s, and only max_paused runs may wait at once.
+escalation:
+  enabled: true
+  wait_s: 600
+  max_paused: 1
+
+capabilities:
+  clinic.issue_refund:
+    approval: supervisor
+    caps:
+      max_param: {amount: 1000.00}     # a hard ceiling, well above the clinic's own $200 approval threshold; refused before any browser starts
+      max_commits_per_day: 25
+  clinic.write_off_balance:
+    approval: supervisor
+    caps:
+      max_param: {amount: 500.00}
+      max_commits_per_day: 10
+  clinic.cancel_appointment:
+    approval: operator
+    caps:
+      max_commits_per_day: 100
+  clinic.submit_claim:
+    approval: operator
+  clinic.update_patient_contact:
+    approval: live
+
+# Evidence screenshots. every_action keeps a screenshot after each step so a run's timeline can show what the page looked like; errors keeps
+# one only when an action fails. Screenshots show whatever the page shows and cannot be redacted, so every_action applies to sandbox targets only
+# unless non_sandbox is true.
+evidence:
+  screenshots: every_action
+  non_sandbox: false
+
+# Playwright traces: a timeline of DOM snapshots, network calls and screenshots, stored as trace.zip in a run's evidence directory
+# and opened with `playwright show-trace`. They record everything typed, passwords included, and cannot be redacted, so the default is
+# failures only, and only against sandbox targets. mode: off | failures | always.
+tracing:
+  mode: failures
+  non_sandbox: false
+
+# Words that make an action irreversible. These extend, never replace, the built-in lists in safety/risk.py.
+risk_keywords:
+  commit: [approve, reject]
+  domain: []
+
+# Applied to evidence (log.jsonl, result.json) and to the run store's copy of parameters.
+# Screenshots are not redacted: there is no reliable way to know where a value renders on screen.
+redaction:
+  patterns:
+    ssn: '\b\d{3}-\d{2}-\d{4}\b'
+    email: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    phone: '\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b'
+    card: '\b(?:\d[ -]?){13,16}\b'
+  field_names: [password, secret, token, credential, ssn, dob, date_of_birth, address]

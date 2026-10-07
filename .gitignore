@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!ui/lib/
 lib64/
 parts/
 sdist/
@@ -216,3 +217,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Run output and OS cruft
+evidence/
+.DS_Store
+clinic/modern/node_modules/
+clinic/modern/dist/
+data/
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/next-env.d.ts
+ui/tsconfig.tsbuildinfo

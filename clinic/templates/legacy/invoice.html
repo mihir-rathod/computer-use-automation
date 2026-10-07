@@ -1,0 +1,12 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>Invoice {{ invoice.number }}</h3>
+<table class="data">
+<tr><th scope="row">Patient</th><td>{{ invoice.patient.last_name }}, {{ invoice.patient.first_name }} ({{ invoice.patient.mrn }})</td></tr>
+<tr><th scope="row">Invoice</th><td>{{ invoice.number }} - {{ invoice.description }}</td></tr>
+<tr><th scope="row">Amount</th><td>{{ invoice.amount_cents|money }}</td></tr>
+<tr><th scope="row">Paid</th><td>{{ invoice.paid_cents|money }}</td></tr>
+<tr><th scope="row">Balance due</th><td>{{ invoice.balance_cents|money }}</td></tr>
+</table>
+<p><a href="/legacy/patients/{{ invoice.patient.id }}">See the patient</a></p>
+{% endblock %}

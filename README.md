@@ -1,384 +1,218 @@
 # Computer-Use Automation System
 
-A system that takes a natural-language goal, uses an LLM to accomplish it against a live UI
-("computer use"), records the successful run as a typed reusable artifact, and replays that
-artifact deterministically -- without the LLM in the loop -- with structured error handling and a
-human escalation path. Capabilities are exposed as a callable API, driven by a thin chatbot, with
-every run visible on a read-only dashboard.
+![CI](https://github.com/mihir-rathod/computer-use-automation-system/actions/workflows/ci.yml/badge.svg?branch=dev)
 
-**This branch is the MERIDIAN CORE adaptation** -- the same core pointed at a real, externally
-hosted target (`web-sample.interface-hiring.com`), covering all 7 of its functions, wrapped as a
-demoable capability API + chatbot + dashboard. See `/WRITEUP.md` for the adaptation write-up.
-**MockBank** -- the original take-home's local fixture -- still works unchanged and is covered
-near the end of this file, mainly as an offline fallback.
+Most legacy and vendor web UIs have no API. They get automated by scripts that break when the page changes, or by an AI agent that drives the UI live on every run: slow, costly, unpredictable.
 
-> Status: the full vertical slice works end to end against MERIDIAN: goal -> discovery -> saved
-> typed artifact -> deterministic replay -> human escalation, plus the capability API, chatbot,
-> and dashboard wrapping all of it. All 7 MERIDIAN functions are recorded as capabilities and
-> replay deterministically, including the review->post confirmation flow and supervisor-gated
-> Place Hold. `/REPORT.md` is the original take-home's design write-up; `/WRITEUP.md` is this
-> adaptation's.
+This project takes a middle path. **An LLM (a large language model; here, Google's Gemini) works out a task once. That run is recorded as a typed, reusable artifact. Every run after that is a deterministic replay with no LLM and no tokens**,
+wrapped in safety checks, human approval, and a full evidence trail.
 
-## Tech stack
+- **Discover** a task from one sentence, on a practice system, and review the recording before anyone can run it.
+- **Replay** it for any record, in about 2 seconds, with the same guarantees every time (a retry can never post twice).
+- **Stay in control**: commits wait for approval, a stuck run pauses for a person to take over, and a changed screen produces a repair proposal a person approves.
 
-| Layer | Choice |
-|---|---|
-| Language / tooling | Python 3.12, `uv` (deps + venv, not pip/poetry) |
-| Browser automation | Playwright (sync API), accessibility-tree-driven -- no coordinates, no visual models |
-| Discovery LLM | Gemini 2.5 Flash (`google-genai` SDK) -- tool-calling drives the browser at discovery time only; replay never calls it |
-| Artifact schema | Pydantic -- typed `Step`/`Artifact` models, also used directly as the capability API's JSON Schema |
-| API / chatbot / dashboard | FastAPI, one process, mounted as separate routers |
-| Server-rendered UI | Jinja2 -- MockBank fixture, operator console, dashboard |
-| Evidence | JSONL event log + screenshots per run, on disk under `/evidence` |
-| Target apps | MockBank (local FastAPI + Jinja2 fixture) and MERIDIAN CORE (hosted, `web-sample.interface-hiring.com`) |
+> Status: in active development on `dev`. **Live practice clinic:** <https://larkspur-clinic-ops.onrender.com> (try `/legacy/login` or `/app/`; free hosting, so the first visit after a quiet spell takes
+> about a minute to wake, and its fake data resets). The platform itself runs on your machine, as below. Measured results are [at the end](#results).
 
-## Architecture
+## How it works
 
-The one point this diagram is meant to make: **every entry point runs through the same
-`ReplayEngine`, gated by the same `SafetyPolicy`** -- the API and chatbot are wrappers around the
-CLI's own execution path, not a second implementation of it.
-
-```mermaid
-flowchart TD
-    subgraph DISC["Discovery -- one-time, per capability"]
-        LLM["Gemini 2.5 Flash<br/>tool-calling"] --> DL["DiscoveryLoop"]
-        DL -->|perceive / act| WS1["WebSurface<br/>(Playwright)"]
-        DL -->|records transcript| REC["recorder.py<br/>parameterizes values,<br/>synthesizes checkpoints"]
-        REC --> ART[("Artifact<br/>/artifacts/*.json")]
-    end
-
-    WS1 -->|drives| TARGET{{"MockBank / MERIDIAN"}}
-
-    subgraph RUN["Replay -- same execution path from every caller"]
-        CLI["cli.py replay"] --> ENGINE
-        API["Capability API<br/>POST /invoke"] --> ENGINE
-        CHAT["Chatbot /chat"] -->|picks capability + args| API
-        ART -->|loaded by| ENGINE["ReplayEngine.run()"]
-        ENGINE -->|every action gated by| SAFE["SafetyPolicy<br/>allowlist + risk classifier"]
-        SAFE -->|approved| SURF["WebSurface<br/>(Playwright)"]
-    end
-
-    SURF -->|drives| TARGET
-
-    ENGINE -->|logs every step| EV[("Evidence<br/>JSONL + screenshots")]
-    EV -->|read by| DASH["Dashboard<br/>(read-only)"]
-
-    SAFE -->|irreversible + unconfirmed,<br/>or hard failure| ESC["Operator Console<br/>pause / human resumes"]
-    ESC -->|resume, confirmed=True| ENGINE
+```
+ one sentence  ──►  DISCOVER (an LLM looks at the page, decides, acts)  ──►  ARTIFACT (typed JSON, reviewed by a person)
+                                                                                      │
+                                                                                      ▼
+                                       REPLAY (no LLM, deterministic)  ◄──  any request, from any front door
+                                                  │
+              ┌───────────────────────────────────┼────────────────────────────────────┐
+              ▼                                   ▼                                    ▼
+        safety checks                      three-way result                     human in the loop
+ (allowlist + risk on every action)  success / business outcome / failure   (approve, take over, repair)
 ```
 
-## Setup
+### Architecture
+
+```mermaid
+flowchart LR
+  subgraph Front["Front doors"]
+    UI["Web console"]
+    CLI["CLI"]
+    MCP["MCP server for AI assistants"]
+  end
+  UI --> API["/v1 API: keys, roles, approvals"]
+  MCP --> API
+  API --> RT["runtime: policy caps, idempotency, approvals"]
+  CLI --> RT
+  RT --> POOL["Browser pool (Playwright)"]
+  POOL --> ENG["Replay engine (no LLM)"]
+  ART[("Artifacts: typed JSON")] --> ENG
+  ENG --> SAFE["Safety check on every action"]
+  SAFE --> TARGET[("Target web app: the clinic")]
+  RT --> STORE[("Run store: SQLite")]
+  ENG --> EVID[("Evidence: logs, screenshots, traces")]
+  DISC["Discovery: draft, record, check"] --> ART
+  DISC --> SAFE
+  DISC --> GEM["Gemini"]
+  ENG -.->|stuck, or needs approval| PERSON["A person"]
+  PERSON -.-> UI
+```
+
+- **Discovery** reads the page as an accessibility-tree element list (not pixels) and drives a real browser one action at a time. Recording is deterministic code, not the LLM.
+- **Replay** classifies every page state. A known *business outcome* ("no such record") is a result, a *recoverable* condition is handled, anything else is a failure that can pause for a person.
+- **Safety** lives in one chokepoint, `Surface.act()`, which discovery and replay both pass through. An irreversible action is blocked unless a human confirms it.
+- **Every front door** goes through the same `runtime` code, so none of them can skip safety, evidence or approval.
+
+## Quickstart
+
+Needs Python 3.12, [uv](https://docs.astral.sh/uv/) and Node 20+.
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env   # then fill in GEMINI_API_KEY (see below)
+cp .env.example .env                        # add GEMINI_API_KEY only to discover new tasks or use chat
+(cd ui && npm install && npm run build)     # the web console, built once
 ```
 
-Get a free `GEMINI_API_KEY` at https://aistudio.google.com/apikey -- no billing required,
-free-tier rate limits apply. Needed for the chatbot and `discover`; not for `replay`, the
-capability API, or the dashboard.
-
-No other keys or config are needed for MERIDIAN CORE -- it's a hosted target with public demo
-credentials, no local server to start:
-
-| Operator | Password | Role |
-|---|---|---|
-| `teller1` | `password` | teller |
-| `super1` | `password` | supervisor (can perform restricted actions, e.g. Place Hold) |
-
-Seed members: `100234`, `100987`, `101555`, `102777`, `103001` -- `100234` (Lovelace, Ada) is the
-one with shares already on HOLD (verified live: 7 of its 13 shares). The app is stateful in
-memory and resets on redeploy -- don't rely on data (balances, shares, holds) persisting across
-sessions.
-
-## Capability API, chatbot, and dashboard
-
-One process serves all three -- the capability API, the chatbot, and the dashboard all live on
-the same FastAPI app, per the brief's own "simpler is fine if justified":
+Start the practice clinic and the platform, in two terminals:
 
 ```bash
+uv run uvicorn clinic.app:app --port 8100
 uv run uvicorn api.app:app --port 8020
 ```
 
-| Surface | URL |
-|---|---|
-| Capability catalog (JSON) | `http://127.0.0.1:8020/capabilities` |
-| Invoke a capability (JSON) | `POST http://127.0.0.1:8020/capabilities/{capability_id}/invoke` |
-| Chatbot | `http://127.0.0.1:8020/chat` |
-| Dashboard -- catalog | `http://127.0.0.1:8020/dashboard` |
-| Dashboard -- run history | `http://127.0.0.1:8020/dashboard/runs` (click a run for its full event timeline + screenshots) |
-| Operator console (escalation) | starts automatically on process boot at `http://127.0.0.1:8010/operator` -- lists every currently-paused run |
+Create one key per role (each is shown once), then open <http://localhost:8020/ui/> and sign in with one:
 
-### Calling `/invoke` directly
+```bash
+uv run python cli.py keys create --name alex --role operator
+uv run python cli.py keys create --name dana --role supervisor
+```
+
+## Try it (about 10 minutes)
+
+1. **Run a task.** Sign in as `alex`, open *Look up a patient by MRN*, enter MRN `LK-100002`, choose *Slow*, and press Run. Watch the amber outline follow each step, then read the result and the step timeline.
+2. **See approval.** Open *Issue a refund*, enter invoice `INV-30001`, amount `25.00`, reason *duplicate payment*. It waits for a supervisor. Sign in as `dana` (a different key: you cannot approve your own request),
+   open the **Inbox**, and approve it. It runs once, and the clinic's audit log at <http://localhost:8100/_test/audit> shows exactly one refund.
+3. **Discover a task.** As `dana`, open **Discover** and type: *Look up appointment A-20002 and tell me the patient and the provider.* Draft it, start discovery, and watch the LLM work. Review the recorded steps,
+   make it available, then run it as `alex` for another appointment (such as `A-20004`). Needs `GEMINI_API_KEY`.
+4. **Change the screen.** Open the clinic's control panel, <http://localhost:8100/_test/panel>, and set UI drift to level 2 (labels renamed). Run that patient lookup again: it fails because the page changed, and the **Inbox**
+   shows a repair proposal. Approve proposals and re-run (about four) until it works again. Switch drift off afterwards.
+
+## Run the tests
+
+```bash
+uv run pytest                                  # everything offline: about 15 minutes, drives a real browser
+uv run pytest tests/test_replay_engine.py -q   # one file, in seconds
+uv run python scripts/benchmark.py all         # the measurements below (discovery needs GEMINI_API_KEY)
+```
+
+434 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
+are built (`cd clinic/modern && npm install && npm run build`). `.github/workflows/ci.yml` runs the offline tests on every push.
+
+## Reference
+
+<details>
+<summary><b>The console, by role</b></summary>
+
+What you see follows your key's role. The role decides visibility only; the API enforces every permission itself.
+
+| Role | Sees |
+|---|---|
+| viewer | Tasks and Runs, read-only |
+| operator | Tasks, My runs, Inbox (the badge counts only what *you* can decide), Chat |
+| supervisor | The above, plus **Discover** |
+| admin | The above, plus **Manage**: Overview (metrics), Artifacts, Policy, API keys |
+
+Keyboard: `g` then a letter to jump between pages, `/` to search, `?` for help. To open a real browser window as well as the live view, start the API with `CUA_ALLOW_WINDOW=1`.
+
+A run that gets stuck pauses instead of failing. An operator opens it from the Inbox, acts on the run's own browser (click, type, choose), then hands it back or stops it. It waits a limited time, and only one run
+may wait at once (`escalation:` in `safety/policy.yaml`).
+</details>
+
+<details>
+<summary><b>Discovering a task: what happens</b></summary>
+
+1. The LLM looks at the system's main page and **drafts** the task: name, inputs, what it reads back, and whether it only reads. If an example value is missing it asks instead of inventing one.
+2. It drives a practice copy using only clicks and typing. Detours and failed actions are pruned from the recording.
+3. The result is saved as a **draft** that nobody can run. The system chooses what text shows success, then replays the draft once with no LLM. A recording that never uses its input, or finds what it reads by the
+   value it saw last time, is not offered as ready.
+4. You review the recorded steps and make it available (the same approval tier as any promotion), or discard it.
+
+A task declared read-only can never commit. If the LLM reaches the one irreversible step it stops and asks you. Passwords, secrets and tokens are refused as inputs. One session runs at a time. Limits are under `discovery:` in `safety/policy.yaml`.
+</details>
+
+<details>
+<summary><b>HTTP API</b></summary>
+
+`/v1` is authenticated and asynchronous (interactive docs at `/docs`). A key's name is recorded as the requester or approver, and its role decides what it may do.
+
+```bash
+curl -s -X POST localhost:8020/v1/runs -H "Authorization: Bearer $ALEX" -H "Idempotency-Key: refund-INV-30001-1" -H 'content-type: application/json' \
+  -d '{"capability_id":"clinic.issue_refund","target":"clinic","params":{"invoice":"INV-30001","amount":"25.00","reason":"duplicate_payment"}}'
+curl -s -X POST localhost:8020/v1/runs/RUN_ID/approve -H "Authorization: Bearer $DANA" -H 'content-type: application/json' -d '{"reason":"invoice checked"}'
+```
+
+A run returns `202` and an id at once; follow it with `GET /v1/runs/{id}` or the `/events` stream. The caller never supplies a URL or credentials; the target profile decides.
+</details>
+
+<details>
+<summary><b>AI assistants (MCP)</b></summary>
+
+`mcp_server.py` exposes every recorded task as an MCP tool, as a thin client of `/v1` under the assistant's own key, so the key's role is its ceiling. There is no tool to approve, a task that commits
+requires an idempotency key, and an assistant that gets stuck fails at once. For Claude Desktop (the API and the clinic must be running):
 
 ```json
-{
-  "params": {"member_id": "100987"},
-  "target": "meridian",
-  "headed": false,
-  "slow_mo": 0
-}
+{"mcpServers": {"capability-platform": {"command": "uv", "args": ["--directory", "/absolute/path/to/this/repo", "run", "python", "mcp_server.py"],
+  "env": {"CUA_API_URL": "http://127.0.0.1:8020", "CUA_API_KEY": "cua_..."}}}}
 ```
+</details>
 
-- **`params`** -- the capability's typed inputs, per its `input_schema`.
-- **`target`** -- `"mockbank"` or `"meridian"`. Defaults to `"mockbank"` if omitted, so pass
-  `"meridian"` explicitly for anything on this branch.
-- **`headed` / `slow_mo`** -- optional. A normal replay runs headless and finishes in under a
-  second, too fast to watch. Set `headed: true` (and a `slow_mo` in ms) to pop open a real,
-  visible Chromium window and slow each action down. The window stays open after the run
-  finishes so you can review the final page -- close it manually before starting another headed
-  run.
-
-The chat page exposes `headed`/`slow_mo` as a plain "Show browser" checkbox and speed selector,
-so you don't need to construct this JSON by hand to watch a run live.
-
-**Recommended way to watch a run live: the chatbot (or a raw `/invoke` call), not the CLI.**
-`cli.py replay --headed` / `discover --headed` do show a real, live browser window while the
-command is running -- but that window closes the moment the command finishes, because the CLI is
-a one-shot script and Playwright's browser is tied to its parent process's lifetime. Only a
-headed run driven through the API server (which stays running) actually keeps the window open
-afterward for review, as described above.
-
-### One execution path
-
-`cli.py replay`, a raw `POST /invoke`, and the chatbot all call the exact same
-`runtime.run_replay()` function underneath. None of these three surfaces is a separate
-implementation, so none of them can become a way around the safety/evidence/escalation
-guarantees described below -- what's true for the CLI is true for the chatbot.
-
-## Demo path
-
-With the server above running (`uv run uvicorn api.app:app --port 8020`):
+<details>
+<summary><b>Command line</b></summary>
 
 ```bash
-# Discovery: a real Gemini-driven run that figures out how to update a member's contact info
-# with no hardcoded steps, watching it drive the actual MERIDIAN pages, then saves the result
-# as a typed, reusable artifact. Picked deliberately: meridian.update_member isn't replayed
-# anywhere else in this demo path, so re-discovering it can't destabilize another step.
-uv run python cli.py discover --capability meridian.update_member --target meridian \
-  --param member_id=100987 --param email=member100987@example.com \
-  --param phone=555-0187 --param address="123 Elm St, Springfield" \
-  --headed --slow-mo 500
-# Note: this window closes the instant the command finishes (see "Calling /invoke directly"
-# above) -- it's for watching the run live, not for reviewing the final page afterward.
-
-# Replay an already-recorded MERIDIAN capability directly (no LLM call needed):
-uv run python cli.py replay --capability meridian.balance_inquiry --target meridian --param member_id=100987
-
-# Or invoke it over HTTP, the same path the chatbot itself uses:
-curl -s -X POST http://127.0.0.1:8020/capabilities/meridian.balance_inquiry/invoke \
-  -H 'Content-Type: application/json' \
-  -d '{"params": {"member_id": "100987"}, "target": "meridian"}'
+uv run python cli.py replay --target clinic --capability clinic.patient_lookup --param mrn=LK-100002                 # replay, no LLM
+uv run python cli.py replay --target clinic --capability clinic.patient_lookup --param mrn=LK-100002 --headed --slow-mo 600
+uv run python cli.py discover --target clinic --capability clinic.patient_lookup --param mrn=LK-100001              # discovery from a catalog spec
+uv run python cli.py artifact list                                                                                 # versions, drafts, what is current
+uv run python cli.py runs pending
+uv run python cli.py approve RUN_ID --by suzie.visor --reason "checked the invoice"
+uv run python cli.py repair list --status pending                                                                  # then: repair show / repair approve
+uv run python cli.py canary run --target clinic                                                                     # read-only replays that catch drift early
+uv run python cli.py metrics --hours 24
 ```
 
-Or open `http://127.0.0.1:8020/chat` and type a request in plain language -- check "Show browser"
-first to watch the real Chromium window drive MERIDIAN's actual pages. Every run (chatbot, API,
-or CLI) shows up immediately at `http://127.0.0.1:8020/dashboard/runs` with its status,
-structured outputs, and full evidence.
+Approver names come from the roster in `safety/policy.yaml`. Metrics are also at `GET /v1/metrics` and `/v1/metrics.prom` (Prometheus). The server logs one JSON line per event, each with its `run_id`.
+A failed run against a sandbox keeps a Playwright trace: `uv run playwright show-trace evidence/<run>/trace.zip`.
+</details>
 
-A message has to include *every* field a capability requires, or it gets declined and asked for
-what's missing rather than run against the wrong capability:
+<details>
+<summary><b>The practice clinic</b></summary>
 
-| Capability | Required fields | Try saying |
-|---|---|---|
-| Balance inquiry | `member_id` | "look up the balance for meridian member 100987" |
-| Funds transfer | `member_id`, `from_share`, `to_share`, `amount` | "transfer $5 from 100987-S0001 to 100987-MMKT-5 for member 100987" |
-| Open share | `member_id`, `share_type`, `initial_deposit` | "open a new share of type S0001 for member 100987 with an initial deposit of $25" |
-| Update member | `member_id`, `email`, `phone`, `address` -- all four, even to change just one | "update email to alan.turing@example.com, phone to 555-0177, and address to 99 Test Ave for member 100987" |
-| Place hold | `member_id`, `share`, `reason_code` | "place a hold on member 100987's share 100987-S0001 for reason code FRAUD" |
+`clinic/` is a fictional clinic front desk and billing portal, built to be automated and measured: a legacy server-rendered skin (`/legacy`, signs in as `frontdesk` / `desk-demo-123` or `supervisor` / `super-demo-123`),
+a React skin (`/app`), a JSON API, and a test kit (`/_test`) with an audit log as ground truth, an idempotent reset, fault injection (latency, 500s, maintenance pages, session expiry, rate limits), a switch for the target's own
+duplicate-submit guard, and four levels of UI drift. All data is synthetic. `docker compose up --build` runs it in a container; set `CLINIC_TEST_TOKEN` on any deployment that is not purely local.
+</details>
 
-All 7 MERIDIAN functions are recorded under `/artifacts/meridian.*.json` and replay the same
-way: `meridian.signon` (precondition for the rest), `meridian.balance_inquiry`,
-`meridian.funds_transfer`, `meridian.open_share`, `meridian.update_member`,
-`meridian.place_hold` (run as `teller1` for a permission-denied business outcome, or override
-`--username super1 --password password` for a real supervised hold).
+## Where things are
 
-## Escalation / human handoff
-
-The transfer example above is irreversible and will pause for a human -- this is the single most
-important thing to have muscle memory for. Open `http://127.0.0.1:8010/operator` (linked
-directly from the chat page) to see the paused run listed, click in, find the confirm button's
-element ref in the table shown, fill in the "Perform an action manually" form (Action: `click`,
-the ref, check "I confirm this action"), click **Perform**, then **Resume Automation**. The chat
-bubble updates itself (no refresh needed) from "paused, needs a human" to the final result with
-a real confirmation number.
-
-Mechanically: the run is genuinely blocked on a live browser session, not polling. The operator
-console runs on its own thread and never touches the live page directly (Playwright's sync API
-isn't safe across threads) -- it only enqueues the action you submit; the automation thread,
-still holding the real page, performs it and resumes itself. This is the same mechanism whether
-the run came from the CLI, a raw API call, or the chatbot -- one path, not three separate ones.
-Pass `--no-operator-console` to `cli.py` to disable this and have a stuck run just fail
-immediately instead.
-
-## What needs live services, and what doesn't
-
-| Command | Needs `GEMINI_API_KEY` | Needs MockBank running | Needs network access |
-|---|---|---|---|
-| `pytest` | no (see note) | no | no, unless `GEMINI_API_KEY` is set (see note) |
-| `uv run python cli.py replay --target mockbank ...` | no | yes | no |
-| `uv run python cli.py replay --target meridian ...` | no | no (hosted) | yes |
-| `uv run python cli.py discover ...` | yes | target-dependent | yes (Gemini call, always) + target's own network need |
-| `uv run uvicorn api.app:app` (capability API + dashboard) *(just starting it, nothing invoked yet)* | no | no | no |
-| ↳ then invoking a `target: "mockbank"` capability through it | no | yes | no |
-| ↳ then invoking a `target: "meridian"` capability through it | no | no (hosted) | yes |
-| `/chat` (chatbot) *(just loading the page)* | no | no | no |
-| ↳ Gemini declines the message (out of scope, e.g. "what's the weather") | yes | no | no |
-| ↳ Gemini calls a MockBank capability | yes | yes | no |
-| ↳ Gemini calls a MERIDIAN capability | yes | no (hosted) | yes |
-
-Three tests make real external calls and auto-skip (not fail) rather than run by default:
-`tests/test_discovery_live.py` and `tests/test_chatbot_live.py` skip without `GEMINI_API_KEY`
-(real Gemini calls, against local MockBank -- no external site involved);
-`tests/test_meridian_guarantees.py` skips unless `RUN_MERIDIAN_LIVE_TESTS=1` is set, since it
-hits the real, live, external MERIDIAN site with genuine side effects (a real transfer posts):
-
-```bash
-RUN_MERIDIAN_LIVE_TESTS=1 uv run pytest tests/test_meridian_guarantees.py
-```
-
-Every other test is unaffected either way. The default `uv run pytest` needs no live services --
-but if `GEMINI_API_KEY` is set (which Setup above has you do), it genuinely does make real,
-external network calls to Google's Gemini API via `test_discovery_live.py`/`test_chatbot_live.py`,
-not just to local MockBank. Unset the key first if you want a fully offline test run.
-
-("no" for MockBank means you don't need to start it yourself -- the WebSurface tests spin up a
-real MockBank instance in-process on an OS-assigned free port for the duration of the test
-session, and drive it with a real headless Chromium via Playwright.)
-
-## Repo layout
-
-```
-/mockbank        MockBank target app (FastAPI + Jinja2)
-/surface          Surface abstraction: perceive()/act(), the aria-snapshot element-list parser,
-                   and the locator fallback-chain resolver. WebSurface (Playwright) is the only
-                   implementation; both discovery and replay drive a surface through this same
-                   interface, the seam that would let a future desktop/legacy-web surface slot
-                   in without changing discovery or replay.
-/agent            LLM-driven discovery loop (decides what to do; acts through a Surface),
-                   the Gemini client, and the capability catalog (agent/catalog.py -- the
-                   human-authored contract each discovery run fills in; includes meridian.* specs)
-/artifacts_lib    Pydantic artifact schema, JSON storage, validation
-/replay           Deterministic replay executor, error classifier (acts through a Surface)
-/safety           Allowlist config (allowlist.json for MockBank, allowlist_meridian.json for
-                   MERIDIAN), risk classifier
-/escalation       Session manager, operator console (human handoff) -- shared by every surface
-/evidence_lib     Structured JSONL logger, redaction -- wired into every Surface.act() call
-/artifacts        Saved capability artifact JSON files (mockbank.* and meridian.*)
-/evidence         Logs/artifacts from real discovery + replay runs (required deliverable)
-/api              The capability API (app.py), chatbot (chatbot.py), and dashboard
-                   (dashboard.py) -- one FastAPI app, mounted as separate routers, all calling
-                   runtime.run_replay() underneath
-/tests            pytest -- schema validation, surface/locator behavior, error classification,
-                   the capability API, the dashboard, and (opt-in) live MERIDIAN coverage
-runtime.py        The one execution path every front door (CLI, API, chatbot) calls to actually
-                   run a capability -- TARGET_PROFILES, run_replay(), the operator console
-                   bootstrap. See its own module docstring.
-cli.py            `discover` and `replay` commands -- see Demo path above
-```
-
-## MockBank -- the original take-home target, still here as an offline fallback
-
-Everything above also works with `--target mockbank` (the CLI's default if `--target` is
-omitted) or `"target": "mockbank"` in an API call -- the same capability API, chatbot, dashboard,
-and escalation console, just pointed at a small local fixture instead of the real hosted site.
-Useful if MERIDIAN or your network is unreachable.
-
-Start it in a separate terminal first:
-
-```bash
-uv run uvicorn mockbank.app:app --port 8000
-```
-
-One hardcoded operator login (no self-registration -- see "What's mocked" below): username
-`operator`, password `bankdemo123`. Both are dummy values checked into `mockbank/data.py`; they
-are not secrets and grant access to nothing but this local mock app.
-
-### Trying it manually
-
-Log in at http://localhost:8000/login, then search a member ID:
-
-| Member ID | Result |
+| Area | Paths |
 |---|---|
-| `10001`, `10002`, `10003` | Active member -- Account Summary with savings/checking balances |
-| `40004` | Permission-denied business outcome ("Access denied") |
-| anything else | Not-found business outcome ("No member found") |
+| **Discovery and replay** | `agent/` (discovery loop, recorder) · `discover/` (discovery from the console) · `replay/` (engine) · `surface/` (Playwright, browser pool) · `artifacts_lib/` (schema, versions, lint, diff) |
+| **Safety and runs** | `safety/` (allowlist, risk, `policy.yaml`) · `runs/` (SQLite store, executor) · `repair/` (drift repair, canaries) · `escalation/` · `evidence_lib/` |
+| **Interfaces** | `api/` (the `/v1` API) · `ui/` (web console, Next.js) · `mcp_server.py` · `cli.py` · `runtime.py` · `observability.py` |
+| **Practice system** | `clinic/` (both skins, JSON API, audit log, fault injection, drift) |
+| **Data** | `artifacts/` (one folder per task, every version) · `data/` (run database) · `evidence/` (screenshots, logs, traces) |
+| **Other** | `tests/` · `scripts/` (`benchmark.py`, `discover_clinic.sh`) · `.github/workflows/ci.yml` |
 
-From an active member's page, "Open Sub-Account" walks through account type (Savings/Checking) +
-initial deposit -> a validation error if the deposit is missing/non-positive -> a confirmation step
--> a success page with a confirmation number. The new sub-account then shows up on the member's
-page under "Sub-Accounts" -- confirming the action actually persisted, not just displayed a message.
+The original MockBank sample and the older chat and dashboard live on the `mockbank` branch; the engine tests still use a small copy of the MockBank site under `tests/support/`.
 
-The four environmental/recoverable conditions (slow load, transient "service unavailable", an
-unexpected terms-update modal, mid-flow session expiry) aren't reachable through the UI -- they're
-armed one-shot, per-session, via a test-only route so the discovery agent never sees a "simulate a
-failure" control sitting in the app it's operating:
+## Results
 
-```bash
-curl "http://localhost:8000/_debug/simulate?condition=slow"   # or: unavailable | terms_modal | expire_session
-```
+Measured with `uv run python scripts/benchmark.py all --trials 3` against the bundled clinic (about 25 minutes). Small samples on one target: read them as how this system behaved here, not as a promise for someone else's software.
 
-Hit that (with the same session cookie/browser context you're about to use), then make the next
-request -- that's the one the condition fires on.
-
-### CLI demo path (MockBank)
-
-```bash
-# Discovery: a real Gemini-driven run that figures out how to look up a member's balance,
-# with no hardcoded steps, then saves the result as a typed, reusable artifact.
-uv run python cli.py discover --capability mockbank.member_balance_lookup --param member_id=10001
-
-# Replay: deterministic, no LLM call, using a DIFFERENT member id than discovery used --
-# proves the artifact genuinely generalized rather than replaying a hardcoded value.
-uv run python cli.py replay --capability mockbank.member_balance_lookup --param member_id=10002
-
-# Business outcomes instead of success (replay never needs GEMINI_API_KEY):
-uv run python cli.py replay --capability mockbank.member_balance_lookup --param member_id=99999    # not_found
-uv run python cli.py replay --capability mockbank.member_balance_lookup --param member_id=40004    # permission_denied
-```
-
-Both commands log in first (username/password default to MockBank's own `operator`/`bankdemo123`
-credentials, per the previous section; override with `--username`/`--password`), print a
-structured result, and write evidence -- a JSONL log of
-every perceive/act plus screenshots -- to `/evidence/<run>/`. `discover` also saves the artifact
-itself to `/artifacts/<capability_id>.json`. Add `--headed` to watch the browser instead of
-running headless.
-
-A second, hand-written capability -- `mockbank.open_subaccount` -- covers what the read-only
-lookup above can't: a validation-error business outcome, and a genuine irreversible step (opening
-the account is final) gated on human confirmation, using the same escalation mechanism described
-above:
-
-```bash
-# Stops cleanly at a validation_error business outcome -- never reaches the irreversible step.
-uv run python cli.py replay --capability mockbank.open_subaccount --param member_id=10002 --param account_type=savings --param initial_deposit=0
-
-# Reaches the irreversible "Confirm & Open Account" step, gets blocked (unconfirmed), and pauses
-# for a human to approve through the operator console.
-uv run python cli.py replay --capability mockbank.open_subaccount --param member_id=10001 --param account_type=checking --param initial_deposit=300
-```
-
-`/evidence/replay_run_20260815T005612Z/` is a saved example of exactly this: `open_subaccount`
-paused at its confirmation gate, a human approved the exact blocked action through the console
-(`log.jsonl` shows it as an `actor: "human"` action with `confirmed: true`), and the run resumed
-to a real completion.
-
-### What's mocked, and why
-
-- **No self-registration / sign-up.** MockBank stands in for internal back-office software used
-  by bank employees -- core banking screens, servicing tools, admin consoles -- not a
-  customer-facing product. Real systems like this provision accounts through IT/HR onboarding,
-  not self-service sign-up, so a register flow would be unrealistic rather than a missing
-  feature. One hardcoded operator login (`operator` / `bankdemo123`, both dummy values) stands
-  in for that provisioning step. This also keeps the login flow a single reusable
-  `mockbank.login` capability with real credential handling (never persisted, read from
-  environment) without building an unneeded user-management surface.
-
-## Data handling
-
-Redaction (`evidence_lib/redaction.py`) covers real secrets only -- passwords, tokens,
-credentials never hit disk. Balances, confirmation numbers, and member names captured in
-evidence stay visible on purpose: everything both targets expose is synthetic seed/demo data,
-and those exact values are what the evidence and dashboard exist to show. See `/WRITEUP.md` for
-the full reasoning behind that scope decision.
+- **Faults:** 159 replays under injected faults (slow pages, a transient 500, a lost session, a maintenance page, errors and a lost session around a commit). Every one ended as it should, carrying on or stopping safely.
+  None double-posted or left the record disagreeing with the result, checked against the clinic's audit log with its own duplicate guard off.
+- **UI drift:** with ids, labels and field names changed, 14 of 14 task runs at the two levels that break replay recovered through human-approved repairs (4 to 5 proposals per task at level 2, up to 11 at level 3).
+  All 77 proposals were right, and every commit changed state exactly once.
+- **No LLM at replay:** 0 LLM calls across 180 replays; a replay takes about 1.8 s.
+- **Discovery:** from one sentence, 3 of 4 read-only tasks were recorded in every attempt (9 of 9), in about 11 s and 13k tokens, 6 steps on average, and each recording was right on 10 other records (90 of 90).
+  The 4th (the first row of a table with no labels) is refused with a reason, because the recorder cannot yet describe such a cell so that it carries over to other records.
+- **Next:** discovering a task on the clinic's React skin.

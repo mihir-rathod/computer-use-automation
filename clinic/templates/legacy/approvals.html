@@ -1,0 +1,20 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ ui.t("Approvals") }}</h3>
+{% if banner %}<p class="ok">{{ banner }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+{% if items %}
+<table class="data {{ ui.c('approvals') }}">
+<tr><td><b>Approval</b></td><td><b>Patient</b></td><td><b>Invoice</b></td><td><b>Amount</b></td><td><b>Requested by</b></td><td><b>Decision</b></td></tr>
+{% for a in items %}
+<tr><td>{{ a.number }}</td><td>{{ a.last_name }}, {{ a.first_name }} ({{ a.mrn }})</td><td>{{ a.invoice_number }}</td>
+<td>{{ a.amount_cents|money }}</td><td>{{ a.requested_by }}</td>
+<td><form method="post" action="/legacy/approvals/decide">
+<input type="hidden" name="{{ ui.n('number') }}" value="{{ a.number }}">
+<input type="text" name="{{ ui.n('note') }}" size="14">
+<input type="submit" name="{{ ui.n('decision') }}" value="{{ ui.t('Approve') }}">
+<input type="submit" name="{{ ui.n('decision') }}" value="{{ ui.t('Deny') }}"></form></td></tr>
+{% endfor %}
+</table>
+{% else %}<p>No approvals are waiting.</p>{% endif %}
+{% endblock %}

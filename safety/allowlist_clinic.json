@@ -1,0 +1,5 @@
+{
+  "allowed_base_urls": ["http://localhost:8100"],
+  "allowed_route_patterns": ["/legacy/*", "/static/*"],
+  "allowed_action_types": ["navigate", "click", "type", "select", "extract", "wait_for", "dismiss_dialog"]
+}

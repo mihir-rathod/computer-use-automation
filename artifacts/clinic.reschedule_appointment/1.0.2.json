@@ -1,0 +1,445 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.reschedule_appointment",
+  "version": "1.0.2",
+  "name": "Reschedule an appointment",
+  "description": "Moves a scheduled appointment to a new date and time.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "appointment": {
+        "type": "string",
+        "pattern": "^A-[0-9]{5}$"
+      },
+      "date": {
+        "type": "string",
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+      },
+      "time": {
+        "type": "string",
+        "pattern": "^[0-9]{2}:[0-9]{2}$"
+      }
+    },
+    "required": [
+      "appointment",
+      "date",
+      "time"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "rescheduled",
+          "not_found",
+          "validation_error"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "APPOINTMENT RESCHEDULED",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/fn/reschedule"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/fn/reschedule",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field number)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='number']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Reschedule appointment",
+            "Appointment no."
+          ],
+          "after": [
+            "Continue"
+          ],
+          "html_name": "number",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{appointment}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{appointment}}",
+        "target": {
+          "semantic_description": "textbox (form field number)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='number']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 1,
+            "before": [
+              "Reschedule appointment",
+              "Appointment no."
+            ],
+            "after": [
+              "Continue"
+            ],
+            "html_name": "number",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Reschedule appointment",
+            "Appointment no."
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/appointments/{{appointment}}/reschedule",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field date)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='date']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "New date",
+            "(YYYY-MM-DD)"
+          ],
+          "after": [
+            "Continue"
+          ],
+          "html_name": "date",
+          "id": null
+        }
+      },
+      "params": {
+        "text": "{{date}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{date}}",
+        "target": {
+          "semantic_description": "textbox (form field date)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='date']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 1,
+            "before": [
+              "New date",
+              "(YYYY-MM-DD)"
+            ],
+            "after": [
+              "Continue"
+            ],
+            "html_name": "date",
+            "id": null
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "New date"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "select",
+      "target": {
+        "semantic_description": "combobox (form field time)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "combobox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='time']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "combobox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "New time",
+            "09:30"
+          ],
+          "after": [
+            "Save changes"
+          ],
+          "html_name": "time",
+          "id": null
+        }
+      },
+      "params": {
+        "value": "{{time}}"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "click",
+      "target": {
+        "semantic_description": "Save changes",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Save changes']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Save changes",
+          "ordinal": 2,
+          "same_role_count": 3,
+          "before": [
+            "New time",
+            "10:30"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "RECORD NOT FOUND",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "Please correct the following",
+          "target": null,
+          "description": null
+        },
+        "outcome": "validation_error",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "APPLICATION ERROR",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 2,
+        "backoff_ms": 300,
+        "backoff_multiplier": 2.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "YOUR SESSION HAS TIMED OUT",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "state_changing",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261004T214239Z",
+    "created_at": "2026-10-04T21:42:47.555936Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "rescheduled"
+  },
+  "canary": null
+}

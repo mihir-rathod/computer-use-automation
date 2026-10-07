@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Clinic test panel</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1f2933}
+h1{font-size:1.4rem} h2{font-size:1.05rem;margin-top:1.6rem;border-bottom:1px solid #d9e0e7;padding-bottom:.2rem}
+fieldset{border:1px solid #d9e0e7;border-radius:6px;margin:.6rem 0}
+label{margin-right:.8rem} input,select,button{font:inherit;padding:.25rem .5rem}
+button{cursor:pointer} pre{background:#f4f6f8;padding:.6rem;border-radius:6px;overflow:auto;max-height:16rem;font-size:.8rem}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.4rem 0}
+.muted{color:#6b7785;font-size:.9rem}
+</style></head>
+<body>
+<h1>Larkspur Clinic Ops &mdash; test panel</h1>
+<p class="muted">Fault injection, UI drift and ground-truth audit for the automation platform. Everything here is also available as JSON under <code>/_test</code>.</p>
+
+<div class="row">
+  <label for="token">Test token</label><input id="token" type="password" size="28" placeholder="{{ 'required' if needs_token else 'not required locally' }}">
+  <button id="save-token">Save</button><span class="muted" id="status"></span>
+</div>
+
+<h2>State</h2>
+<div class="row"><button id="refresh">Refresh</button><button id="reset">Reset to seed</button></div>
+<pre id="state">loading...</pre>
+
+<h2>Chaos rules</h2>
+<fieldset>
+  <div class="row">
+    <label for="kind">Kind</label>
+    <select id="kind"><option>latency</option><option>error500</option><option>maintenance</option><option>expire_session</option><option>rate_limit</option></select>
+    <label for="glob">Path glob</label><input id="glob" size="22" placeholder="/legacy/transactions/*">
+    <label for="method">Method</label><select id="method"><option value="">any</option><option>GET</option><option>POST</option></select>
+  </div>
+  <div class="row">
+    <label for="ms">Latency ms</label><input id="ms" size="6" value="1500">
+    <label for="limit">Rate limit / min</label><input id="limit" size="4" value="5">
+    <label for="remaining">Fires</label><input id="remaining" size="4" value="1"><span class="muted">(blank = sticky until cleared)</span>
+    <button id="add-rule">Add rule</button><button id="clear-rules">Clear all</button>
+  </div>
+</fieldset>
+<div class="row">
+  <label><input type="checkbox" id="guard" checked> Duplicate-submit guard on</label>
+  <span class="muted">Turn off to let a retried confirm post twice.</span>
+</div>
+
+<h2>UI drift</h2>
+<div class="row">
+  <label for="level">Level</label>
+  <select id="level"><option value="0">0 - none</option><option value="1">1 - ids and classes</option><option value="2">2 - + visible labels</option><option value="3">3 - + field names</option></select>
+  <label for="seed">Seed</label><input id="seed" size="10" value="run-1"><button id="apply-drift">Apply</button>
+</div>
+
+<h2>Audit log (latest 40 effects and denials)</h2>
+<div class="row"><button id="refresh-audit">Refresh</button><label><input type="checkbox" id="effects"> effects only</label></div>
+<pre id="audit">loading...</pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const tokenKey = "clinic_test_token";
+$("token").value = localStorage.getItem(tokenKey) || "";
+const headers = () => ({"Content-Type": "application/json", "X-Test-Token": localStorage.getItem(tokenKey) || ""});
+async function call(method, path, body) {
+  const r = await fetch("/_test" + path, {method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body)});
+  const text = await r.text();
+  if (!r.ok) { $("status").textContent = r.status + " " + text.slice(0, 120); throw new Error(text); }
+  $("status").textContent = "";
+  return JSON.parse(text);
+}
+async function refresh() {
+  const s = await call("GET", "/state");
+  $("state").textContent = JSON.stringify(s, null, 2);
+  $("guard").checked = s.chaos.duplicate_guard;
+  $("level").value = s.drift.level;
+}
+async function refreshAudit() {
+  const q = $("effects").checked ? "?effects_only=true&limit=2000" : "?limit=2000";
+  const a = await call("GET", "/audit" + q);
+  const rows = a.items.filter((r) => r.effect || r.outcome !== "ok").slice(-40);
+  $("audit").textContent = rows.map((r) => `${r.id} ${r.ts.slice(11, 19)} ${r.actor}/${r.skin} ${r.action} ${r.entity_id} -> ${r.outcome}${r.effect ? " [EFFECT]" : ""}`).join("\n") || "(nothing yet)";
+}
+$("save-token").onclick = () => { localStorage.setItem(tokenKey, $("token").value); refresh().then(refreshAudit); };
+$("refresh").onclick = refresh; $("refresh-audit").onclick = refreshAudit; $("effects").onchange = refreshAudit;
+$("reset").onclick = async () => { await call("POST", "/reset", {}); await refresh(); await refreshAudit(); };
+$("add-rule").onclick = async () => {
+  const remaining = $("remaining").value.trim();
+  await call("POST", "/chaos", {
+    kind: $("kind").value, method: $("method").value || null, path_glob: $("glob").value || null,
+    remaining: remaining === "" ? null : Number(remaining),
+    params: {ms: Number($("ms").value), limit: Number($("limit").value)},
+  });
+  await refresh();
+};
+$("clear-rules").onclick = async () => { await call("DELETE", "/chaos"); await refresh(); };
+$("guard").onchange = async () => { await call("POST", "/chaos/duplicate-guard", {enabled: $("guard").checked}); await refresh(); };
+$("apply-drift").onclick = async () => { await call("POST", "/drift", {level: Number($("level").value), seed: $("seed").value}); await refresh(); };
+refresh().then(refreshAudit).catch(() => {});
+</script>
+</body></html>

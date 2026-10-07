@@ -11,6 +11,7 @@ specifies the contract, an agent figures out the implementation -- not the other
 """
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -18,7 +19,9 @@ from agent.loop import DiscoveryResult, RecordedAction
 from artifacts_lib.schema import (
     ActionType,
     Artifact,
+    CanarySpec,
     CapabilityTarget,
+    CommitApproval,
     ErrorHandling,
     JSONSchemaObject,
     Preconditions,
@@ -38,10 +41,22 @@ def _parameterize(value: str, parameters: dict[str, str]) -> str:
     """Replace any concrete parameter value that appears literally in `value` with its
     {{name}} placeholder -- e.g. "10001" -> "{{member_id}}". This is the whole mechanism that
     turns one concrete recorded run into a reusable, parameterized capability."""
-    for name, concrete in parameters.items():
-        if concrete and concrete in value:
-            value = value.replace(concrete, f"{{{{{name}}}}}")
+    # Longest value first, and only where the value stands alone: "20" must not be pulled out of "2026-03-04" or out of another input's value ("A-200021"
+    # is not "A-20002"). A blind replace once corrupted an email that happened to contain a member id (WRITEUP incident on the Meridian branch).
+    for name, concrete in sorted(parameters.items(), key=lambda kv: -len(kv[1] or "")):
+        if concrete:
+            value = re.sub(rf"(?<![A-Za-z0-9]){re.escape(concrete)}(?![A-Za-z0-9])", lambda _m, n=name: f"{{{{{n}}}}}", value)
     return value
+
+
+_RECORD_ID_SEGMENT = re.compile(r"^(\d+|[A-Za-z]{1,4}-\d+)$")
+
+
+def _generalize_path(path: str) -> str:
+    """A URL checkpoint is a statement about *which page*, not which record: /legacy/patients/1 recorded during
+    discovery would fail for every other patient. Numeric ids and business numbers (A-20003) become wildcards;
+    ones that are inputs were already turned into {{placeholders}} by _parameterize."""
+    return "/".join("*" if _RECORD_ID_SEGMENT.match(seg) else seg for seg in path.split("/"))
 
 
 def _synthesize_checkpoint(recorded: RecordedAction, parameters: dict[str, str]) -> Signal | None:
@@ -53,7 +68,7 @@ def _synthesize_checkpoint(recorded: RecordedAction, parameters: dict[str, str])
     before_path = urlsplit(recorded.observed_before.url).path
     after_path = urlsplit(recorded.observed_after.url).path if recorded.observed_after else before_path
     if after_path != before_path:
-        return Signal(type=SignalType.URL_MATCHES, value=_parameterize(f"**{after_path}", parameters))
+        return Signal(type=SignalType.URL_MATCHES, value=f"**{_generalize_path(_parameterize(after_path, parameters))}")
     if recorded.action.kind == ActionType.TYPE and recorded.result.resolved_target is not None:
         return Signal(
             type=SignalType.ELEMENT_VALUE_EQUALS,
@@ -63,17 +78,21 @@ def _synthesize_checkpoint(recorded: RecordedAction, parameters: dict[str, str])
     return None
 
 
-def _build_step(step_id: str, recorded: RecordedAction, parameters: dict[str, str]) -> Step:
+def _build_step(step_id: str, recorded: RecordedAction, parameters: dict[str, str], classifier: RiskClassifier = _risk_classifier,
+                optional_inputs: frozenset[str] = frozenset()) -> Step:
     action = recorded.action
     target = recorded.result.resolved_target
     params = {k: (_parameterize(v, parameters) if isinstance(v, str) else v) for k, v in action.params.items()}
-    risk = _risk_classifier.classify(
+    risk = classifier.classify(
         action.kind,
         semantic_description=target.semantic_description if target else None,
         current_path=urlsplit(recorded.observed_before.url).path,
     )
+    only = re.fullmatch(r"\{\{(\w+)\}\}", str(params.get("text", params.get("value", ""))))
+    when_present = only.group(1) if only and action.kind in (ActionType.TYPE, ActionType.SELECT) and only.group(1) in optional_inputs else None
     return Step(
         step_id=step_id,
+        when_present=when_present,
         action=action.kind,
         target=target,
         params=params,
@@ -102,13 +121,20 @@ def build_artifact(
     discovery_run_id: str,
     preconditions: Preconditions | None = None,
     success_output_defaults: dict[str, str] | None = None,
+    risk_classifier: RiskClassifier | None = None,
+    canary: CanarySpec | None = None,
 ) -> Artifact:
     if result.stop_reason != "finished":
         raise ValueError(
             f"cannot build an artifact from a discovery run that did not finish successfully "
             f"(stop_reason={result.stop_reason!r}, reasoning={result.reasoning!r})"
         )
-    steps = [_build_step(f"s{i + 1}", recorded, parameters) for i, recorded in enumerate(result.transcript)]
+    optional_inputs = frozenset(k for k in input_schema.properties if k not in input_schema.required)
+    steps = [_build_step(f"s{i + 1}", recorded, parameters, risk_classifier or _risk_classifier, optional_inputs) for i, recorded in enumerate(result.transcript)]
+    approvals = [
+        CommitApproval(step_id=f"s{i + 1}", approver=r.commit_approval.approver or "unknown", mode=r.commit_approval.mode, at=datetime.now(UTC))
+        for i, r in enumerate(result.transcript) if r.commit_approval is not None and r.commit_approval.approved
+    ]
     return Artifact(
         capability_id=capability_id,
         version=version,
@@ -123,11 +149,13 @@ def build_artifact(
         error_handling=error_handling,
         safety=safety,
         success_output_defaults=success_output_defaults or {},
+        canary=canary,
         provenance=Provenance(
             discovered_by=discovered_by,
             discovery_run_id=discovery_run_id,
             created_at=datetime.now(UTC),
             reviewed=False,
             note="LLM-discovered; not yet human-reviewed.",
+            commit_approvals=approvals,
         ),
     )

@@ -1,0 +1,23 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ ui.t("Today's schedule") }}</h3>
+{% if problems %}<p class="err">Please correct the following:</p><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+<form method="get" action="/legacy/schedule">
+<table><tr><td><label for="sched-date">Date</label></td><td><input type="date" id="sched-date" name="{{ ui.n('date') }}" value="{{ date }}"></td>
+<td><label for="sched-provider">Provider</label></td><td><select id="sched-provider" name="{{ ui.n('provider') }}"><option value="">All</option>
+{% for p in providers %}<option value="{{ p }}" {{ "selected" if p == provider }}>{{ p }}</option>{% endfor %}</select></td>
+<td><input type="submit" value="{{ ui.t('Show') }}"></td></tr></table>
+</form>
+{% if prev_day and next_day %}<p><a href="/legacy/schedule?{{ ui.n('date') }}={{ prev_day }}&amp;{{ ui.n('provider') }}={{ provider|urlencode }}">&laquo; Previous day</a> &nbsp;
+<a href="/legacy/schedule?{{ ui.n('date') }}={{ next_day }}&amp;{{ ui.n('provider') }}={{ provider|urlencode }}">Next day &raquo;</a>
+&nbsp; or <a href="/legacy/fn/find">find an appointment by number</a></p>{% endif %}
+{% if rows is not none %}
+<table class="data {{ ui.c('schedule') }}">
+<caption>Appointments on {{ date }}</caption>
+<tr><th scope="col">Appt no.</th><th scope="col">Time</th><th scope="col">Provider</th><th scope="col">MRN</th><th scope="col">Patient</th><th scope="col">Reason</th><th scope="col">Status</th></tr>
+{% for r in rows %}<tr><td><a href="/legacy/appointments/{{ r.number }}">{{ r.number }}</a></td><td>{{ r.starts_at|fmt_time }}</td><td>{{ r.provider }}</td><td>{{ r.mrn }}</td>
+<td>{{ r.last_name }}, {{ r.first_name }}</td><td>{{ r.reason }}</td><td>{{ r.status }}</td></tr>{% endfor %}
+</table>
+{% if not rows %}<p>No appointments scheduled.</p>{% endif %}
+{% endif %}
+{% endblock %}

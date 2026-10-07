@@ -1,7 +1,7 @@
-"""The Surface interface -- ASSIGNMENT_ORIGINAL.md 3.7's seam between "how we perceive/act
-on a surface" and "the recorded flow". WebSurface (surface/web.py, Playwright) is the only
-implementation built here; LegacyWebSurface and DesktopSurface are a design extension
-documented in REPORT.md heading 4, not built, but this is the interface they'd implement.
+"""The Surface interface -- the seam between "how we perceive/act on a surface" and "the
+recorded flow". WebSurface (surface/web.py, Playwright) is the only implementation built here;
+LegacyWebSurface and DesktopSurface would be a design extension, not built, but this is the
+interface they'd implement.
 
 Both the discovery agent and the replay engine drive a Surface through the same two calls
 (perceive/act) and the same Action/ActionResult shapes -- there is no separate "replay mode"
@@ -26,6 +26,7 @@ class ObservedElement:
     value: str | None = None
     options: list[str] | None = None  # combobox only: available option labels
     state: dict[str, str] = field(default_factory=dict)  # raw aria flags, e.g. {"disabled": ""}
+    html_name: str | None = None  # the form field's `name` attribute, read only for controls with no accessible name
 
 
 @dataclass
@@ -43,6 +44,8 @@ class ObservedState:
             lines.append("  (none)")
         for el in self.elements:
             label = f'{el.role} "{el.name}"' if el.name else el.role
+            if not el.name and el.html_name:
+                label += f' (unlabeled form field name="{el.html_name}")'
             suffix = ""
             if el.value:
                 suffix += f" = {el.value!r}"
@@ -60,6 +63,8 @@ class Action:
     params: dict[str, Any] = field(default_factory=dict)
     actor: str = "system"  # "agent" | "replay" | "human" -- who/what is driving this action
     confirmed: bool = False  # explicit approval for an irreversible action (safety/policy.py)
+    step_id: str | None = None  # which artifact step this action replays, so evidence can be joined back to the artifact
+    capability_id: str | None = None  # ...and which artifact that step belongs to (a run also replays the sign-on capability)
 
     def __post_init__(self) -> None:
         if self.kind != ActionType.NAVIGATE and self.ref is None and self.target is None:
@@ -75,6 +80,10 @@ class ActionResult:
     resolved_strategy: LocatorStrategy | None = None
     extracted_value: str | None = None
     error: str | None = None
+    dispatched: bool = False  # a state-affecting action was issued; it may have reached the target even if success is False
+    applied_params: dict[str, Any] | None = None  # params as the surface actually applied them (e.g. a select option's real value)
+    unresolved: bool = False  # no locator in the target's chain matched an element on the page
+    blocked: str | None = None  # "allowlist" | "irreversible_unconfirmed": refused before anything was issued
 
 
 class Surface(ABC):

@@ -1,6 +1,6 @@
 """Integration tests for the deterministic replay engine against real MockBank + real Chromium.
 
-Covers ASSIGNMENT_ORIGINAL.md 3.3's three-way result contract end to end: success with typed
+Covers the three-way result contract end to end: success with typed
 outputs, business outcomes (not_found, permission_denied), recoverable conditions (transient
 unavailable, terms modal, slow load, session expiry), and hard failures -- plus the
 idempotency safety gate on auto-resume after reauthentication.
@@ -152,8 +152,8 @@ def test_reauthenticate_and_resume_after_session_expiry(page, mockbank_base_url,
 def test_non_idempotent_step_blocks_auto_resume(page, mockbank_base_url, tmp_path):
     """A non-idempotent step that already completed must block auto-restart-on-reauth, even
     though reauthentication itself would otherwise succeed -- this is the concrete mechanism
-    behind "never auto-retry a non-idempotent step after an ambiguous failure" (PROJECT_PLAN.md
-    Section 2's design notes on the schema's `idempotent` field).
+    behind "never auto-retry a non-idempotent step after an ambiguous failure" (see the schema's
+    `idempotent` field).
 
     Uses a minimal 2-step artifact built in-test rather than the real lookup artifact: s1 is a
     pure client-side `type` (no server round-trip, so it can't consume or be affected by

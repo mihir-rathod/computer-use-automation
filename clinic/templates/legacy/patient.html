@@ -1,0 +1,48 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+{% set p = d.patient %}
+<h3>Patient record</h3>
+{% if banner %}<p class="ok">{{ banner }}</p>{% endif %}
+<table class="data">
+<tr><td>MRN</td><td>{{ p.mrn }}</td><td>Name</td><td>{{ p.last_name }}, {{ p.first_name }}</td></tr>
+<tr><td>Date of birth</td><td>{{ p.dob }}</td><td>Insurer</td><td>{{ p.insurer or "SELF-PAY" }} {{ p.insurance_member_id or "" }}</td></tr>
+<tr><td>Phone</td><td>{{ p.phone }}</td><td>Email</td><td>{{ p.email }}</td></tr>
+<tr><td>Address</td><td colspan="3">{{ p.address }}</td></tr>
+<tr><td>Balance due</td><td colspan="3"><b>{{ d.balance_cents|money }}</b></td></tr>
+</table>
+<p><a href="/legacy/patients/{{ p.id }}/contact">{{ ui.t("Update contact") }}</a></p>
+
+<h3>APPOINTMENTS</h3>
+{% if d.appointments %}
+<table class="data {{ ui.c('appointments') }}" id="{{ ui.i('appointments') }}">
+<tr><td><b>Appt no.</b></td><td><b>Date / time</b></td><td><b>Provider</b></td><td><b>Reason</b></td><td><b>Status</b></td><td></td></tr>
+{% for a in d.appointments %}
+<tr><td>{{ a.number }}</td><td>{{ a.starts_at|fmt_dt }}</td><td>{{ a.provider }}</td><td>{{ a.reason }}</td><td>{{ a.status }}</td>
+<td>{% if a.can_modify %}<a href="/legacy/appointments/{{ a.number }}/cancel">{{ ui.t("Cancel") }}</a>
+ <a href="/legacy/appointments/{{ a.number }}/reschedule">{{ ui.t("Reschedule") }}</a>{% endif %}</td></tr>
+{% endfor %}
+</table>
+{% else %}<p>No appointments on file.</p>{% endif %}
+
+<h3>INVOICES</h3>
+{% if d.invoices["items"] %}
+<table class="data {{ ui.c('invoices') }}" id="{{ ui.i('invoices') }}">
+<tr><td><b>Invoice</b></td><td><b>Description</b></td><td><b>Amount</b></td><td><b>Paid</b></td><td><b>Balance</b></td><td><b>Claim</b></td><td></td></tr>
+{% for i in d.invoices["items"] %}
+<tr><td>{{ i.number }}</td><td>{{ i.description }}</td><td>{{ i.amount_cents|money }}</td><td>{{ i.paid_cents|money }}</td>
+<td>{{ i.balance_cents|money }}</td><td>{{ "SUBMITTED" if i.claimed else "-" }}</td>
+<td>{% if not i.claimed and i.balance_cents > 0 %}<a href="/legacy/invoices/{{ i.number }}/claim">{{ ui.t("Claim") }}</a> {% endif %}
+{% if i.refundable_cents > 0 %}<a href="/legacy/invoices/{{ i.number }}/refund">{{ ui.t("Refund") }}</a> {% endif %}
+{% if i.balance_cents > 0 %}<a href="/legacy/invoices/{{ i.number }}/writeoff">{{ ui.t("Write off") }}</a>{% endif %}</td></tr>
+{% endfor %}
+</table>
+<p>Page {{ d.invoices.page }} of {{ d.invoices.pages }}
+{% if d.invoices.page > 1 %} <a href="/legacy/patients/{{ p.id }}?inv_page={{ d.invoices.page - 1 }}">{{ ui.t("Prev") }}</a>{% endif %}
+{% if d.invoices.page < d.invoices.pages %} <a href="/legacy/patients/{{ p.id }}?inv_page={{ d.invoices.page + 1 }}">{{ ui.t("Next") }}</a>{% endif %}</p>
+{% else %}<p>No invoices on file.</p>{% endif %}
+
+{% if d.claims %}<h3>CLAIMS</h3>
+<table class="data">{% for c in d.claims %}<tr><td>{{ c.number }}</td><td>{{ c.invoice_number }}</td><td>{{ c.payer }}</td><td>{{ c.amount_cents|money }}</td><td>{{ c.status }}</td></tr>{% endfor %}</table>{% endif %}
+{% if d.refunds %}<h3>REFUNDS</h3>
+<table class="data">{% for r in d.refunds %}<tr><td>{{ r.number }}</td><td>{{ r.invoice_number }}</td><td>{{ r.amount_cents|money }}</td><td>{{ r.status }}</td></tr>{% endfor %}</table>{% endif %}
+{% endblock %}

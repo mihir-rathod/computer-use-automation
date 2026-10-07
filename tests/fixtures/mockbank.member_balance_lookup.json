@@ -175,6 +175,6 @@
     "discovery_run_id": "fixture-phase3-schema-validation",
     "created_at": "2026-08-14T00:00:00Z",
     "reviewed": true,
-    "note": "Hand-written to validate the artifact schema shape before the discovery agent exists (Section 8 build order, step 3) -- not the LLM-driven run ASSIGNMENT_ORIGINAL.md Section 4 requires. That run's artifact and evidence land in /evidence/ in a later phase."
+    "note": "Hand-written to validate the artifact schema shape before the discovery agent existed -- not an LLM-driven run. The real discovered artifact is artifacts/mockbank.member_balance_lookup.json."
   }
 }

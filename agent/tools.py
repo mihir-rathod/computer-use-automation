@@ -70,6 +70,8 @@ GIVE_UP = types.FunctionDeclaration(
 )
 
 ALL_TOOLS = [types.Tool(function_declarations=[NAVIGATE, CLICK, TYPE_TEXT, SELECT_OPTION, EXTRACT, FINISH, GIVE_UP])]
+# For a model that has to find its own way: no typing of addresses, only the links and buttons on the page. A small model given the option guesses URLs.
+CLICK_ONLY_TOOLS = [types.Tool(function_declarations=[CLICK, TYPE_TEXT, SELECT_OPTION, EXTRACT, FINISH, GIVE_UP])]
 
 _ACTION_TOOL_KINDS = {
     "navigate": ActionType.NAVIGATE,

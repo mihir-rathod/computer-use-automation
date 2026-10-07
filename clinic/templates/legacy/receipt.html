@@ -1,0 +1,9 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+{% if duplicate %}<h3 class="err">THIS TRANSACTION WAS ALREADY PROCESSED</h3>{% else %}<h3 class="ok">{{ result.message }}</h3>{% endif %}
+<table class="data">
+<tr><td>Receipt number</td><td><b>{{ result.receipt_number }}</b></td></tr>
+{% for line in result.lines %}<tr><td>{{ line.label }}</td><td>{{ line.value }}</td></tr>{% endfor %}
+</table>
+<p><a href="/legacy/menu">Main menu</a></p>
+{% endblock %}

@@ -1,11 +1,10 @@
 """Combines the allowlist and risk classifier into the single object Surface.act() consults --
-one enforcement point for both discovery and replay (PROJECT_PLAN.md Section 8 step 6: "wire
-this into Surface.act() itself... not into the replay engine alone").
+one enforcement point for both discovery and replay (wired into Surface.act() itself, not
+into the replay engine alone).
 
-Handling the risky class: this project blocks by default (conservative), per ASSIGNMENT_ORIGINAL.md
-3.4's "block, require confirmation, or flag -- your call, justify it". An irreversible action
-only proceeds if the caller explicitly passes Action.confirmed=True -- i.e. something upstream
-(a human, via Phase 9's escalation console; or an orchestration script that has decided to
+Handling the risky class: this project blocks by default (conservative). An irreversible
+action only proceeds if the caller explicitly passes Action.confirmed=True -- i.e. something
+upstream (a human, via the operator console; or an orchestration script that has decided to
 demonstrate the full flow for evidence) has already obtained approval. Surface itself never
 grants that approval on its own.
 """
@@ -23,6 +22,7 @@ class SafetyDecision:
     allowed: bool
     risk_level: StepRiskLevel
     reason: str | None = None
+    block_kind: str | None = None
 
 
 class SafetyPolicy:
@@ -47,9 +47,9 @@ class SafetyPolicy:
         try:
             self.allowlist.check(url, action_type.value)
         except AllowlistViolation as exc:
-            return SafetyDecision(allowed=False, risk_level=StepRiskLevel.SAFE, reason=f"blocked by allowlist: {exc}")
+            return SafetyDecision(allowed=False, risk_level=StepRiskLevel.SAFE, reason=f"blocked by allowlist: {exc}", block_kind="allowlist")
 
         risk = self.risk_classifier.classify(action_type, semantic_description, current_path)
         if risk == StepRiskLevel.IRREVERSIBLE and self.require_confirmation_for_irreversible and not confirmed:
-            return SafetyDecision(allowed=False, risk_level=risk, reason="blocked: irreversible action requires confirmation")
+            return SafetyDecision(allowed=False, risk_level=risk, reason="blocked: irreversible action requires confirmation", block_kind="irreversible_unconfirmed")
         return SafetyDecision(allowed=True, risk_level=risk)

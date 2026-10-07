@@ -1,0 +1,9 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>{{ title }}</h3>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<form method="post" action="/legacy/fn/{{ kind }}">
+<table><tr><td><label for="fn-number">{{ prompt }}</label></td><td><input type="text" id="fn-number" name="{{ ui.n('number') }}" size="14" autocomplete="off"></td></tr>
+<tr><td></td><td><input type="submit" value="{{ ui.t('Continue') }}"></td></tr></table>
+</form>
+{% endblock %}

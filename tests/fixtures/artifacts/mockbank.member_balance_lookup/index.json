@@ -1,0 +1,13 @@
+{
+  "current": "2.0.0",
+  "history": [
+    {
+      "action": "initial",
+      "version": "2.0.0",
+      "from": null,
+      "at": "2026-10-03T19:49:47+00:00",
+      "by": "migration",
+      "reason": "converted from flat layout"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 """Resolves an artifact's Target (an ordered locator fallback chain) against a live Playwright
-page -- the concrete mechanism behind "stable element targeting" (ASSIGNMENT_ORIGINAL.md 3.3).
+page -- the concrete mechanism behind "stable element targeting".
 Used by replay directly, and by WebSurface.act() when a discovery-era ref isn't available.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from playwright.sync_api import TimeoutError as PWTimeoutError
 from artifacts_lib.schema import Locator as SchemaLocator
 from artifacts_lib.schema import LocatorStrategy, Target
 
-_ROLE_VALUE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>[^']*)'\])?$")
+_ROLE_VALUE_RE = re.compile(r"^(?P<role>[a-zA-Z]+)(?:\[name='(?P<name>.*)'\])?$")
 RESOLVE_TIMEOUT_MS = 2000
 
 

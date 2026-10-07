@@ -1,0 +1,437 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.patient_lookup",
+  "version": "1.0.0",
+  "name": "Look up a patient by MRN",
+  "description": "Finds a patient by medical record number and returns their demographics and balance due.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "legacy_web",
+    "base_url": "http://localhost:8100",
+    "vendor_product": "larkspur-clinic-ops",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on operator session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "mrn": {
+        "type": "string",
+        "pattern": "^LK-[0-9]{6}$"
+      }
+    },
+    "required": [
+      "mrn"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "found",
+          "not_found"
+        ]
+      },
+      "patient_name": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "date_of_birth": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "phone": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "email": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "balance_due": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "Patient record",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/patients"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/patients",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "type",
+      "target": {
+        "semantic_description": "textbox (form field mrn)",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#mrn",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          },
+          {
+            "strategy": "css",
+            "value": "[name='mrn']",
+            "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": null,
+          "ordinal": 0,
+          "same_role_count": 3,
+          "before": [
+            "Patient lookup",
+            "MRN"
+          ],
+          "after": [
+            "Last name",
+            "Date of birth"
+          ],
+          "html_name": "mrn",
+          "id": "mrn"
+        }
+      },
+      "params": {
+        "text": "{{mrn}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{mrn}}",
+        "target": {
+          "semantic_description": "textbox (form field mrn)",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "#mrn",
+              "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+            },
+            {
+              "strategy": "css",
+              "value": "[name='mrn']",
+              "note": "Fallback: no accessible name or id at discovery time -- the HTML name attribute is the only stable identifier this element has."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": null,
+            "ordinal": 0,
+            "same_role_count": 3,
+            "before": [
+              "Patient lookup",
+              "MRN"
+            ],
+            "after": [
+              "Last name",
+              "Date of birth"
+            ],
+            "html_name": "mrn",
+            "id": "mrn"
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "click",
+      "target": {
+        "semantic_description": "Search",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Search']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Search",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Date of birth",
+            "(YYYY-MM-DD)"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Select",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "link[name='Select']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "link",
+          "name": "Select",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "1972-06-12",
+            "Cascade Mutual"
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/patients/*",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Name' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Name\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Name"
+        }
+      },
+      "params": {},
+      "output_binding": "patient_name",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Date of birth' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Date of birth\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Date of birth"
+        }
+      },
+      "params": {},
+      "output_binding": "date_of_birth",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Phone' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Phone\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Phone"
+        }
+      },
+      "params": {},
+      "output_binding": "phone",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s8",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Email' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Email\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Email"
+        }
+      },
+      "params": {},
+      "output_binding": "email",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    },
+    {
+      "step_id": "s9",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Balance due' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Balance due\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Balance due"
+        }
+      },
+      "params": {},
+      "output_binding": "balance_due",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "No patients matched your search",
+          "target": null,
+          "description": null
+        },
+        "outcome": "not_found",
+        "output_field": "status"
+      }
+    ],
+    "recoverable": [
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "APPLICATION ERROR",
+          "target": null,
+          "description": null
+        },
+        "action": "retry",
+        "max_attempts": 2,
+        "backoff_ms": 300,
+        "backoff_multiplier": 2.0,
+        "recovery_target": null
+      },
+      {
+        "signal": {
+          "type": "text_present",
+          "value": "YOUR SESSION HAS TIMED OUT",
+          "target": null,
+          "description": null
+        },
+        "action": "reauthenticate_and_resume",
+        "max_attempts": 1,
+        "backoff_ms": 0,
+        "backoff_multiplier": 1.0,
+        "recovery_target": null
+      }
+    ],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "read_only",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discovery_run_20261003T213821Z",
+    "created_at": "2026-10-03T21:38:29.966618Z",
+    "reviewed": false,
+    "note": "LLM-discovered; not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "found"
+  },
+  "canary": {
+    "params": {
+      "mrn": "LK-100001"
+    },
+    "expect": {
+      "status": "found",
+      "patient_name": "Brennan, Avery"
+    }
+  }
+}

@@ -126,3 +126,13 @@ def test_build_artifact_rejects_unfinished_run():
     result = DiscoveryResult(stop_reason="give_up", reasoning="stuck", transcript=[])
     with pytest.raises(ValueError, match="did not finish"):
         build_artifact(result, {}, **_artifact_kwargs())
+
+
+def test_url_checkpoint_does_not_pin_the_record_id_seen_during_discovery():
+    from agent.recorder import _generalize_path, _parameterize
+
+    assert _generalize_path("/legacy/patients/1") == "/legacy/patients/*"
+    assert _generalize_path("/legacy/patients/42/contact") == "/legacy/patients/*/contact"
+    assert _generalize_path("/legacy/fn/refund") == "/legacy/fn/refund"
+    # an id that is an input stays a precise placeholder: parameterize first, then generalize what is left
+    assert _generalize_path(_parameterize("/legacy/appointments/A-20003/cancel", {"appointment": "A-20003"})) == "/legacy/appointments/{{appointment}}/cancel"

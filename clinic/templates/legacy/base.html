@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{% block title %}Larkspur Clinic Ops{% endblock %}</title>
+<link rel="stylesheet" href="/static/legacy.css"></head>
+<body>
+<table width="100%" class="{{ ui.c('banner') }}"><tr>
+<td><b>LARKSPUR CLINIC OPS</b>{% if actor %} &nbsp; <a href="/legacy/menu">Main menu</a>{% endif %}</td>
+<td align="right">{% if actor %}{{ actor.username }} ({{ actor.role }}) &nbsp;
+<form method="post" action="/legacy/logout" style="display:inline"><input type="submit" value="{{ ui.t('Sign out') }}"></form>{% endif %}</td>
+</tr></table>
+<table width="100%"><tr><td>
+{% block body %}{% endblock %}
+</td></tr></table>
+<p class="foot">Clinic date: {{ today|fmt_date }}</p>
+</body></html>

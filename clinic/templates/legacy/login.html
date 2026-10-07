@@ -1,0 +1,13 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3>Sign on</h3>
+{% if reason == 'timeout' %}<p class="err">YOUR SESSION HAS TIMED OUT. Please sign on again.</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<form method="post" action="/legacy/login">
+<table>
+<tr><td>User ID</td><td><input type="text" name="{{ ui.n('username') }}" id="{{ ui.i('user_id') }}" size="16"></td></tr>
+<tr><td>Password</td><td><input type="password" name="{{ ui.n('password') }}" size="16"></td></tr>
+<tr><td></td><td><input type="submit" value="{{ ui.t('Sign In') }}"></td></tr>
+</table>
+</form>
+{% endblock %}

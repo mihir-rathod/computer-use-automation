@@ -1,6 +1,5 @@
-"""Enforces an explicit, configurable allowlist -- ASSIGNMENT_ORIGINAL.md 3.4: "an explicit,
-configurable allowlist (permitted domains/routes, allowed action types). The agent must not act
-outside it." Loaded from JSON at startup; checked inside Surface.act() itself (see
+"""Enforces an explicit, configurable allowlist (permitted domains/routes, allowed action
+types) -- the agent must not act outside it. Loaded from JSON at startup; checked inside Surface.act() itself (see
 surface/web.py) -- the one chokepoint both discovery and replay pass through, so neither can
 accidentally bypass a rule the other respects. A violation always raises; there is no
 allowed-by-default / silent-skip path.
@@ -13,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
-DEFAULT_ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist.json"
+DEFAULT_ALLOWLIST_PATH = Path(__file__).resolve().parent / "allowlist_clinic.json"
 
 
 class AllowlistViolation(Exception):

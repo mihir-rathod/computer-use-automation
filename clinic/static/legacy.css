@@ -1,0 +1,17 @@
+body{background:#ece9d8;font-family:Tahoma,Verdana,sans-serif;font-size:12px;color:#000;margin:8px}
+table{border-collapse:collapse}
+td{padding:3px 6px;vertical-align:top}
+h3{margin:10px 0 6px;font-size:14px}
+a{color:#0000cc}
+input[type=text],input[type=password],select,textarea{font-size:12px;border:1px solid #7f9db9;background:#fff}
+input[type=submit]{font-size:12px;padding:1px 10px}
+.banner{background:#003399;color:#fff}
+.banner a,.banner b{color:#fff}
+.banner input{font-size:11px}
+.data{border:1px solid #808080;background:#fff}
+.data td{border:1px solid #c0c0c0}
+.err{color:#b00000;font-weight:bold}
+.ok{color:#006400;font-weight:bold}
+.warn{color:#8a5a00}
+.foot{color:#555;margin-top:18px}
+.lbl{color:#333}

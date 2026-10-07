@@ -1,0 +1,7 @@
+{% extends "legacy/base.html" %}
+{% block body %}
+<h3 class="err">{{ heading }}</h3>
+{% if problems %}<ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+{% if message and not problems %}<p>{{ message }}</p>{% endif %}
+<p><a href="{{ back_url or '/legacy/menu' }}">{{ ui.t('Back') }}</a></p>
+{% endblock %}

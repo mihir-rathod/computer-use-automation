@@ -1,0 +1,13 @@
+{
+  "current": "1.0.0",
+  "history": [
+    {
+      "action": "initial",
+      "version": "1.0.0",
+      "from": null,
+      "at": "2026-10-03T21:38:20+00:00",
+      "by": "discovery",
+      "reason": "discovery run discovery_run_20261003T213816Z"
+    }
+  ]
+}

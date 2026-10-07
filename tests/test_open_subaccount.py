@@ -1,7 +1,7 @@
 """Integration tests for the hand-written mockbank.open_subaccount artifact -- the capability
-that exercises validation_error (ASSIGNMENT_ORIGINAL.md 3.3's sixth named runtime condition,
-not covered by mockbank.member_balance_lookup) and a genuine irreversible, confirmation-gated
-step at full artifact/replay granularity (3.4), closing both gaps deliberately: member_balance_
+that exercises validation_error (not covered by mockbank.member_balance_lookup) and a genuine
+irreversible, confirmation-gated step at full artifact/replay granularity, closing both gaps
+deliberately: member_balance_
 lookup is read-only and never needed either.
 """
 from __future__ import annotations
@@ -19,9 +19,9 @@ from safety.allowlist import AllowlistConfig, AllowlistPolicy
 from safety.policy import SafetyPolicy
 from surface.base import Action
 from surface.web import WebSurface
-from tests.conftest import login
+from tests.conftest import FIXTURE_ARTIFACTS, login
 
-ARTIFACT = load_artifact_by_id("mockbank.open_subaccount")
+ARTIFACT = load_artifact_by_id("mockbank.open_subaccount", FIXTURE_ARTIFACTS)
 
 
 def _safety_policy(base_url: str) -> SafetyPolicy:

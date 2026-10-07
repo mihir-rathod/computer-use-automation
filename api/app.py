@@ -1,114 +1,82 @@
-"""The capability API -- ASSIGNMENT_ORIGINAL.md 3.2: "a callable catalog... an agent invokes a
-capability by name with typed args and gets a structured result back, without knowing anything
-about the underlying UI." This is also the app the chatbot (api/chatbot.py, mounted below) and
-dashboard (Phase 5) live on -- one process, one port, for the whole demoable surface, per the
-brief's own "simpler is fine if justified" and "we do not reward... scaling infrastructure."
+"""The platform's API server: the authenticated `/v1` API, the web console under `/ui`, and the discovery and chat routes that sit on `/v1`.
 
-Every invocation calls runtime.run_replay() -- the exact same execution path cli.py's `replay`
-command uses -- so this can never become a second implementation of "how do I run a capability",
-and can never become a way around the safety/evidence/escalation guarantees already built into
-that one path (3.5).
-
-Route handlers below are plain `def`, not `async def`, on purpose: run_replay() is a blocking,
-synchronous Playwright call that can take several seconds. FastAPI runs sync `def` handlers in a
-worker thread pool automatically, so a slow replay doesn't block the event loop or other
-concurrent requests -- no asyncio wrapping needed for something this simple.
+Every run goes through runtime.run_replay() / prepare_run() -- the exact path cli.py uses -- so no front door can become a way around the safety, evidence and
+approval guarantees built into it. (An older, unauthenticated, synchronous `/capabilities/{id}/invoke` endpoint, with its own chat page and dashboard, used to
+live here; the console and `/v1` replaced them. They are kept on the `mockbank` branch.)
 """
 from __future__ import annotations
 
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import FastAPI
 
-from artifacts_lib.storage import list_artifacts
-from runtime import TARGET_PROFILES, ensure_operator_console, run_replay
+import observability
 
-# Before importing api.chatbot: GeminiClient is only constructed inside a request handler (not
-# at import time), but load here anyway so GEMINI_API_KEY is guaranteed present before this
-# process ever serves a request, not just before the first chat message happens to arrive.
+# So GEMINI_API_KEY is in the environment before this process serves its first request, not only before the first chat message happens to arrive.
 load_dotenv()
 
-from api.chatbot import router as chatbot_router
-from api.dashboard import router as dashboard_router
-
-app = FastAPI(title="Capability API")
-app.include_router(chatbot_router)
-app.include_router(dashboard_router)
-
-# Started here, not left to the first invoke's own lazy start (runtime.run_replay ->
-# ensure_operator_console): the chatbot page links to this console as soon as it loads (see
-# api/chatbot.py's _operator_console_url()), and that link needs to actually work before anyone
-# has triggered a run, not just after.
-ensure_operator_console(8010)
+from api.chat_v1 import router as chat_v1_router  # noqa: E402
+from api.discover_v1 import router as discover_router, service as discover_service  # noqa: E402
+from api.v1 import router as v1_router  # noqa: E402
 
 
-class InvokeRequest(BaseModel):
-    params: dict[str, Any] = {}
-    target: str = "mockbank"
-    base_url: str | None = None
-    username: str | None = None
-    password: str | None = None
-    headed: bool = False
-    slow_mo: int = 0
-    evidence_dir: str | None = Field(
-        default=None, description="Pre-computed run id/path -- lets a caller (the chatbot) know "
-                                    "the run's id before it starts, e.g. to link to its operator "
-                                    "console session while still in flight. Defaults to run_replay's own."
-    )
+def _recover_interrupted_runs() -> None:
+    """Runs left `running`/`queued` by a process that died would block their idempotency keys for ever."""
+    import runtime
+    from artifacts_lib import storage
+    from safety.config import irreversible_step_ids
+
+    def has_commit(capability_id: str) -> bool:
+        try:
+            return bool(irreversible_step_ids(storage.load_artifact_by_id(capability_id)))
+        except Exception:
+            return True  # cannot tell, so assume it could have committed
+
+    runtime.default_store().recover_interrupted(has_commit)
 
 
-@app.get("/capabilities")
-def list_capabilities() -> list[dict[str, Any]]:
-    """The callable catalog itself -- everything an agent needs to invoke a capability by name
-    with typed args, without knowing anything about the underlying UI, straight from what's
-    already on disk under /artifacts/. No separate registry to keep in sync."""
-    return [
-        {
-            "capability_id": a.capability_id,
-            "name": a.name,
-            "description": a.description,
-            "input_schema": a.input_schema.model_dump(),
-            "output_schema": a.output_schema.model_dump(),
-            "safety": a.safety.model_dump(),
-            "target_app_id": a.target.app_id,
-        }
-        for a in list_artifacts()
-    ]
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    observability.configure("INFO")
+    _recover_interrupted_runs()
+    discover_service().recover()
+    yield
 
 
-@app.post("/capabilities/{capability_id}/invoke")
-def invoke_capability(capability_id: str, body: InvokeRequest) -> dict[str, Any]:
-    """Runs the capability for real via runtime.run_replay() and returns its structured result.
-    HTTP-level errors (404, 422) are reserved for problems with the *call itself* -- an unknown
-    capability_id, a malformed body. A replay that completes as a business outcome or even a
-    hard failure is still a successful API call: 200, with that outcome in the body, matching
-    the brief's own "success, a known business outcome, or a failure with enough detail to
-    debug" contract (3.3) -- collapsing a hard failure into an HTTP error would blur exactly the
-    distinction that contract exists to keep clear.
-    """
-    if body.target not in TARGET_PROFILES:
-        raise HTTPException(status_code=422, detail=f"unknown target '{body.target}' -- known: {sorted(TARGET_PROFILES)}")
-    try:
-        result, evidence_dir = run_replay(
-            capability_id, body.params,
-            target=body.target, base_url=body.base_url, username=body.username, password=body.password,
-            headed=body.headed, slow_mo=body.slow_mo,
-            evidence_dir=Path(body.evidence_dir) if body.evidence_dir else None,
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"unknown capability '{capability_id}'")
+app = FastAPI(
+    lifespan=_lifespan,
+    title="Capability API",
+    description="`/v1` is the authenticated, asynchronous API: send `Authorization: Bearer <key>`, and create keys with `cli.py keys create`.",
+)
 
-    return {
-        "capability_id": result.capability_id,
-        "status": result.status.value,
-        "outputs": result.outputs,
-        "business_outcome": result.business_outcome,
-        "error": result.error.model_dump() if result.error else None,
-        "steps_completed": result.steps_completed,
-        "escalated": result.escalated,
-        "recovered": result.recovered,
-        "evidence_dir": str(evidence_dir),
-    }
+
+@app.middleware("http")
+async def _log_v1_requests(request, call_next):
+    """One structured line per /v1 call: who, what, status, how long. Never the body or the key."""
+    if not request.url.path.startswith("/v1"):
+        return await call_next(request)
+    started = time.monotonic()
+    response = await call_next(request)
+    observability.log("http.request", method=request.method, path=request.url.path, status=response.status_code,
+                      ms=round((time.monotonic() - started) * 1000), principal=getattr(request.state, "principal", None))
+    return response
+
+
+app.include_router(v1_router)
+app.include_router(chat_v1_router)
+app.include_router(discover_router)
+
+# The console (ui/, a static Next.js export) is served from the same process and port, under /ui. It exists once `npm run build` has run in ui/.
+UI_DIR = Path(__file__).resolve().parent.parent / "ui" / "out"
+if UI_DIR.is_dir():
+    from fastapi.responses import RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/ui", StaticFiles(directory=UI_DIR, html=True), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    def _root() -> RedirectResponse:
+        return RedirectResponse("/ui/")

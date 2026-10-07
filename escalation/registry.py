@@ -25,3 +25,9 @@ def list_sessions() -> list[SessionManager]:
 
 def unregister_session(session_id: str) -> None:
     _SESSIONS.pop(session_id, None)
+
+
+def paused_sessions() -> list[SessionManager]:
+    """Sessions currently waiting for, or being worked on by, a person."""
+    from escalation.session_manager import SessionMode
+    return [s for s in list(_SESSIONS.values()) if s.mode in (SessionMode.PAUSED, SessionMode.HUMAN_ACTIVE)]

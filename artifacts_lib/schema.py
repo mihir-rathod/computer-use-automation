@@ -2,10 +2,9 @@
 
 An artifact is what a successful discovery run (agent/) produces and what the replay
 engine (replay/) executes without an LLM in the loop. It is the seam between "the model
-figured this out once" and "this now runs deterministically, cheaply, on demand" --
-ASSIGNMENT_ORIGINAL.md Section 2's through-line.
+figured this out once" and "this now runs deterministically, cheaply, on demand".
 
-Design principles (see REPORT.md heading 2 for the full rationale):
+Design principles:
 - `Locator` fallback chains are the one mechanism used everywhere a concrete element needs
   to be found -- both for acting (Step.target) and for checking (Signal.target). Nothing
   else in this schema invents a second way to point at an element.
@@ -43,7 +42,7 @@ class Locator(BaseModel):
     note: str | None = Field(
         default=None,
         description="Why this locator was chosen / how robust it is expected to be -- "
-                     "the 'reasoning about robustness' ASSIGNMENT_ORIGINAL.md 3.2 asks for.",
+                     "the reasoning about robustness.",
     )
 
 
@@ -52,10 +51,16 @@ class Target(BaseModel):
 
     Replay tries locators[0] first; if it fails to resolve, it tries locators[1], etc.
     This -- not any single selector -- is the concrete mechanism behind "stable element
-    targeting" (3.3).
+    targeting".
     """
     semantic_description: str
     locators: list[Locator]
+    hints: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Facts recorded at discovery time that are not locators but help find the element "
+                     "again when every locator breaks: its position among same-role elements and the names "
+                     "of its neighbours. Used only to rank repair proposals, never to act.",
+    )
 
     @field_validator("locators")
     @classmethod
@@ -121,8 +126,8 @@ _TARGET_REQUIRED_ACTIONS = {ActionType.CLICK, ActionType.TYPE, ActionType.SELECT
 
 
 class StepRiskLevel(str, Enum):
-    """Binary by design -- ASSIGNMENT_ORIGINAL.md 3.4 asks to distinguish safe/reversible
-    from risky/irreversible, not to build a finer-grained taxonomy."""
+    """Binary by design -- the job is to distinguish safe/reversible from risky/irreversible,
+    not to build a finer-grained taxonomy."""
     SAFE = "safe"
     IRREVERSIBLE = "irreversible"
 
@@ -143,6 +148,12 @@ class Step(BaseModel):
                      "Artifact.success_checkpoint, which confirms the overall goal was reached.",
     )
     risk_level: StepRiskLevel = StepRiskLevel.SAFE
+    when_present: str | None = Field(
+        default=None,
+        description="Name of an optional input. The step (and its checkpoint) runs only if the caller supplied that input; "
+                     "otherwise it is skipped and whatever the page already holds stays. This is what makes a partial update "
+                     "possible: change one field without re-sending, or wiping, the others.",
+    )
     idempotent: bool = Field(
         default=True,
         description="False for e.g. a final submit that creates a record. Replay must never "
@@ -183,14 +194,14 @@ class CapabilityTarget(BaseModel):
     tenant_id: str | None = Field(
         default=None,
         description="Null for a base/reference capability. Set when a capability has been "
-                     "specialized for one tenant -- see REPORT.md heading 4.",
+                     "specialized for one tenant.",
     )
 
 
 class Preconditions(BaseModel):
     requires_capability: str | None = Field(
         default=None,
-        description="e.g. 'mockbank.login' -- models auth as its own reusable capability "
+        description="e.g. 'clinic.login' -- models auth as its own reusable capability "
                      "instead of duplicating login steps in every flow.",
     )
     note: str | None = None
@@ -200,20 +211,26 @@ class Preconditions(BaseModel):
 # Typed input/output -- a minimal JSON-Schema-shaped object, not a full JSON Schema
 # implementation. Deliberately compatible with how LLM tool-calling APIs (Anthropic/
 # Gemini/OpenAI) already describe function parameters, so a capability's input_schema
-# can be handed to a tool-calling model directly -- relevant for the "agent-facing
-# capability interface" stretch goal.
+# can be handed to a tool-calling model directly (the chatbot does exactly this).
 # --------------------------------------------------------------------------------------
 
 class JSONSchemaObject(BaseModel):
     type: Literal["object"] = "object"
     properties: dict[str, dict[str, Any]] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
+    at_least_one_of: list[str] = Field(
+        default_factory=list,
+        description="For an update capability whose individual fields are all optional: the caller must supply at least one of these.",
+    )
 
     @model_validator(mode="after")
     def required_fields_are_declared(self) -> JSONSchemaObject:
         unknown = set(self.required) - set(self.properties.keys())
         if unknown:
             raise ValueError(f"required field(s) {sorted(unknown)} not present in properties")
+        unknown = set(self.at_least_one_of) - set(self.properties.keys())
+        if unknown:
+            raise ValueError(f"at_least_one_of field(s) {sorted(unknown)} not present in properties")
         return self
 
 
@@ -245,6 +262,7 @@ class RecoverableRule(BaseModel):
     action: RecoveryAction
     max_attempts: int = 1
     backoff_ms: int = 0
+    backoff_multiplier: float = Field(default=1.0, ge=1.0, description="Each further attempt waits backoff_ms * multiplier**n.")
     recovery_target: Target | None = Field(
         default=None,
         description="Element to act on for the recovery itself -- e.g. a dialog's dismiss "
@@ -293,12 +311,31 @@ class SafetyMeta(BaseModel):
     )
 
 
+class CommitApproval(BaseModel):
+    """Who approved recording an irreversible step, and how."""
+    step_id: str
+    approver: str
+    mode: Literal["supervised", "auto_sandbox"]
+    at: datetime
+
+
 class Provenance(BaseModel):
     discovered_by: str = Field(description="Model id (e.g. a Gemini model id), or 'hand_written' for fixtures.")
     discovery_run_id: str
     created_at: datetime
     reviewed: bool = False
     note: str | None = None
+    parent_version: str | None = Field(default=None, description="The version this one was derived from (repairs).")
+    approved_by: str | None = None
+    change_note: str | None = None
+    repair_proposal_id: str | None = None
+    commit_approvals: list[CommitApproval] = Field(default_factory=list)
+
+
+class CanarySpec(BaseModel):
+    """A known-good invocation used by scheduled canary replays to catch UI drift early."""
+    params: dict[str, Any] = Field(default_factory=dict)
+    expect: dict[str, Any] = Field(default_factory=dict, description="Output fields that must equal these values.")
 
 
 # --------------------------------------------------------------------------------------
@@ -316,7 +353,7 @@ class Artifact(BaseModel):
                      "artifacts as the schema evolves. Distinct from `version`, which is this "
                      "capability's own recorded-flow version.",
     )
-    capability_id: str = Field(description="'<app_id>.<name>', e.g. 'mockbank.member_balance_lookup'.")
+    capability_id: str = Field(description="'<app_id>.<name>', e.g. 'clinic.patient_lookup'.")
     version: str = Field(description="Semver of this capability's recorded flow, e.g. '1.0.0'.")
     name: str
     description: str
@@ -340,6 +377,7 @@ class Artifact(BaseModel):
                      "success_checkpoint rather than a business outcome -- e.g. {'status': "
                      "'found'}. Keeps the replay engine generic instead of hardcoding a field name.",
     )
+    canary: CanarySpec | None = None
 
     @field_validator("capability_id")
     @classmethod
@@ -359,6 +397,11 @@ class Artifact(BaseModel):
     def steps_non_empty_with_unique_ids(self) -> Artifact:
         if not self.steps:
             raise ValueError("artifact must have at least one step")
+        for s in self.steps:
+            if s.when_present and s.when_present not in self.input_schema.properties:
+                raise ValueError(f"step {s.step_id} is conditional on '{s.when_present}', which is not a declared input")
+            if s.when_present and s.when_present in self.input_schema.required:
+                raise ValueError(f"step {s.step_id} is conditional on '{s.when_present}', but that input is required, so it is always present")
         ids = [s.step_id for s in self.steps]
         if len(ids) != len(set(ids)):
             dupes = sorted({i for i in ids if ids.count(i) > 1})
