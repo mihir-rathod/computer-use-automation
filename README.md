@@ -13,8 +13,8 @@ Built with Python 3.12, FastAPI, Playwright, Pydantic and SQLite; a Next.js (Rea
 - **Replay** it for any record, in about 2 seconds, with the same guarantees every time (a retry can never post twice).
 - **Stay in control**: commits wait for approval, a stuck run pauses for a person to take over, and a changed screen produces a repair proposal a person approves.
 
-> Status: in active development on `dev`. **Live practice clinic:** <https://larkspur-clinic-ops.onrender.com> (try `/legacy/login` or `/app/`; free hosting, so the first visit after a quiet spell takes
-> about a minute to wake, and its fake data resets). The platform itself runs on your machine, as below. Measured results are [at the end](#results).
+> **Live practice clinic:** <https://larkspur-clinic-ops.onrender.com> (try `/legacy/login` or `/app/`; free hosting, so the first visit after a quiet spell takes about a minute to wake,
+> and its fake data resets). The platform itself runs on your machine, as below. Measured results are [at the end](#results).
 
 ## How it works
 
