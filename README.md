@@ -1,11 +1,13 @@
 # Computer-Use Automation System
 
-![CI](https://github.com/mihir-rathod/computer-use-automation-system/actions/workflows/ci.yml/badge.svg?branch=dev)
+![CI](https://github.com/mihir-rathod/computer-use-automation-system/actions/workflows/ci.yml/badge.svg)
 
 Most legacy and vendor web UIs have no API. They get automated by scripts that break when the page changes, or by an AI agent that drives the UI live on every run: slow, costly, unpredictable.
 
 This project takes a middle path. **An LLM (a large language model; here, Google's Gemini) works out a task once. That run is recorded as a typed, reusable artifact. Every run after that is a deterministic replay with no LLM and no tokens**,
 wrapped in safety checks, human approval, and a full evidence trail.
+
+Built with Python 3.12, FastAPI, Playwright, Pydantic and SQLite; a Next.js (React, TypeScript) console; Gemini as the LLM; MCP for AI assistants; Docker, GitHub Actions and Render.
 
 - **Discover** a task from one sentence, on a practice system, and review the recording before anyone can run it.
 - **Replay** it for any record, in about 2 seconds, with the same guarantees every time (a retry can never post twice).

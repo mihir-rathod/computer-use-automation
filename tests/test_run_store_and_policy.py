@@ -377,3 +377,39 @@ def test_a_database_from_before_the_rename_keeps_its_discovery_sessions(tmp_path
     store = RunStore(path)
     assert store.discovery_get("teach_old_1")["capability_id"] == "clinic.x_y"
     assert store.discovery_create("dana", "clinic.z_z", "clinic", "{}")["id"].startswith("disc_")
+
+
+def test_the_platform_waits_for_a_sleeping_host_but_not_for_a_stopped_local_one(monkeypatch):
+    """A free-tier host takes a while to wake; a target that is simply not running on this machine should still fail at once."""
+    import http.server
+    import threading
+    import time
+
+    answers = {"left": 2}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            asleep = answers["left"] > 0
+            answers["left"] -= 1
+            self.send_response(503 if asleep else 200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        assert runtime.wait_until_up(base, timeout_s=5, interval_s=0.05) is False   # on this machine: checked once, and the first answer is "asleep" (503)
+        assert answers["left"] == 1
+        answers["left"] = 2
+        monkeypatch.setattr(runtime, "_LOOPBACK", ())                               # pretend the same address is a remote host
+        assert runtime.wait_until_up(base, timeout_s=10, interval_s=0.05) is True   # it is waited for until it answers
+        assert answers["left"] < 0
+    finally:
+        server.shutdown()
+    monkeypatch.undo()
+    started = time.monotonic()
+    assert runtime.wait_until_up("http://127.0.0.1:1", timeout_s=30) is False       # nothing listening, on this machine: no waiting
+    assert time.monotonic() - started < 15

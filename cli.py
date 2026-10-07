@@ -26,7 +26,8 @@ from typing import Any
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-import runtime
+load_dotenv()  # before `import runtime`, which reads CLINIC_BASE_URL (and friends) from the environment when it is imported
+import runtime  # noqa: E402
 from agent.catalog import get_spec
 from agent.commit_gate import auto_sandbox_gate, supervised_gate
 from agent.gemini_client import GeminiClient

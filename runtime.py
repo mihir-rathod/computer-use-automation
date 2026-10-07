@@ -370,6 +370,28 @@ def prepare_run(
 _UNREACHABLE = ("ERR_CONNECTION_REFUSED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_TIMED_OUT", "ERR_ADDRESS_UNREACHABLE", "ERR_CONNECTION_RESET", "ERR_INTERNET_DISCONNECTED")
 
 
+_LOOPBACK = ("localhost", "127.0.0.1", "::1", "[::1]")
+
+
+def wait_until_up(base_url: str, timeout_s: float = 90.0, interval_s: float = 2.0) -> bool:
+    """A free-tier host sleeps when idle and takes up to a minute to wake, which is longer than a page timeout. Poll its /healthz until it answers: any answer below 500
+    means it is up; a refused connection, a timeout or a 5xx means keep waiting. A host on this machine is checked once, so a stopped local target still fails at once."""
+    import httpx
+
+    wait = 0.0 if urlsplit(base_url).hostname in _LOOPBACK else timeout_s
+    deadline = time.monotonic() + wait
+    url = base_url.rstrip("/") + "/healthz"
+    while True:
+        try:
+            if httpx.get(url, timeout=10, follow_redirects=True).status_code < 500:
+                return True
+        except httpx.HTTPError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval_s)
+
+
 def _room_to_pause(policy: PolicyConfig) -> Callable[[SessionManager], bool]:
     def may_pause(session: SessionManager) -> bool:
         from escalation.registry import paused_sessions
@@ -448,6 +470,8 @@ def _replay_in_browser(
     """
     capability_id = artifact.capability_id
     profile = resolve_target(target, base_url, username, password, allowlist)
+    if not wait_until_up(profile["base_url"]):
+        observability.log("run.target_not_up", logging.WARNING, target=target)  # carry on: the browser then reports it in plain words (target_unreachable)
     logger = EvidenceLogger(evidence_dir, redactor=Redactor.from_config(policy.redaction).with_secrets_from({**params, "password": profile["password"]}))
     # Same reasoning as cmd_discover's own run_start log (cli.py): the dashboard needs to know
     # what a run is even if it crashes or hangs before ever reaching the "replay"/"result" event.

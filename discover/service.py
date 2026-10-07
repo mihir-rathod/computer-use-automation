@@ -159,6 +159,7 @@ class DiscoveryService:
         row = self.store.discovery_get(sid)
         assert row is not None
         profile = runtime.resolve_target(contract.target)
+        runtime.wait_until_up(profile["base_url"])  # a sleeping host needs up to a minute to wake
         cid = contract.capability_id(profile["app_id"])
         version = storage.next_version(cid, self.adir)
         spec = contract.to_spec(profile, version)
