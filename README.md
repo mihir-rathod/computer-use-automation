@@ -1,6 +1,6 @@
 # Computer-Use Automation System
 
-![CI](https://github.com/mihir-rathod/computer-use-automation-system/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/mihir-rathod/computer-use-automation/actions/workflows/ci.yml/badge.svg)
 
 Most legacy and vendor web UIs have no API. They get automated by scripts that break when the page changes, or by an AI agent that drives the UI live on every run: slow, costly, unpredictable.
 

@@ -1,5 +1,5 @@
 [project]
-name = "computer-use-automation-system"
+name = "computer-use-automation"
 version = "0.1.0"
 description = "Computer-use automation system: LLM-driven discovery, artifact recording, deterministic replay, and human escalation against a legacy-style bank app."
 requires-python = ">=3.12"

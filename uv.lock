@@ -293,7 +293,7 @@ wheels = [
 ]
 
 [[package]]
-name = "computer-use-automation-system"
+name = "computer-use-automation"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
