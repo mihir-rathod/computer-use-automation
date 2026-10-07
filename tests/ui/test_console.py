@@ -303,6 +303,17 @@ def test_an_admin_creates_a_key_that_is_shown_once_and_can_revoke_it(page, conso
     assert httpx.get(f"{console.base}/v1/me", headers={"Authorization": f"Bearer {key}"}).status_code == 401
 
 
+def test_a_re_render_between_g_and_the_letter_does_not_lose_the_shortcut(page, console):
+    """The sidebar re-renders on a timer (the inbox badge). A re-render between the two key presses used to reset the "g", so the shortcut did nothing on a slower machine."""
+    console.open(page, "root", "")
+    expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()
+    page.get_by_role("heading", name="What do you want to do?").click()
+    page.keyboard.press("g")
+    page.get_by_role("button", name="Theme", exact=False).click()      # changes the sidebar's state: a re-render between the two keys
+    page.keyboard.press("r")
+    expect(page.get_by_role("heading", name="Runs")).to_be_visible()
+
+
 def test_keyboard_shortcuts_theme_and_the_policy_page(page, console):
     console.open(page, "root", "")
     expect(page.get_by_role("heading", name="What do you want to do?")).to_be_visible()

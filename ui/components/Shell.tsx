@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { actionableCount, navFor, type NavItem } from "@/lib/access";
 import { useApi, useAuth, useTheme } from "@/lib/hooks";
 import { Dialog } from "./ui";
@@ -23,25 +23,29 @@ export function Shell({ children }: { children: ReactNode }) {
   const count = actionableCount(inbox.data, me);
   const all = [...nav.main, ...nav.manage];
 
+  // "g" then a letter. The armed flag and the page list live in refs, so a re-render between the two key presses (the inbox badge refreshes on a timer) cannot lose the "g".
+  const allRef = useRef(all);
+  allRef.current = all;
+  const armedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
-    let armed = false, timer: ReturnType<typeof setTimeout> | undefined;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "?") { setHelp(true); return; }
       if (e.key === "/") { const s = document.querySelector<HTMLInputElement>("[data-search]"); if (s) { e.preventDefault(); s.focus(); } return; }
-      if (armed) {
-        armed = false; clearTimeout(timer);
-        const hit = all.find((n) => n.key === e.key.toLowerCase());
+      if (armedRef.current) {
+        armedRef.current = false; clearTimeout(timerRef.current);
+        const hit = allRef.current.find((n) => n.key === e.key.toLowerCase());
         if (hit) { e.preventDefault(); router.push(hit.href); }
         return;
       }
-      if (e.key === "g") { armed = true; timer = setTimeout(() => (armed = false), 1200); }
+      if (e.key === "g") { armedRef.current = true; clearTimeout(timerRef.current); timerRef.current = setTimeout(() => { armedRef.current = false; }, 1200); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router, all]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router]);
 
   const active = (href: string) => (href === "/" ? path === "/" || path === "" || path.startsWith("/task") : path.startsWith(href.replace(/\/$/, "")));
   const item = (n: NavItem) => (

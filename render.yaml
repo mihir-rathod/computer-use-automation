@@ -1,5 +1,6 @@
 # Render blueprint for the clinic target (free web service). Free services sleep when idle, so the
-# platform waits for /healthz before a run starts. Not yet deployed or verified against Render.
+# platform waits for /healthz before a run starts. The image builds and runs locally (both skins, /_test locked behind the token, a task replayed against it);
+# it is deployed at https://larkspur-clinic-ops.onrender.com.
 services:
   - type: web
     name: larkspur-clinic-ops

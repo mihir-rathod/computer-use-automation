@@ -11,7 +11,8 @@ wrapped in safety checks, human approval, and a full evidence trail.
 - **Replay** it for any record, in about 2 seconds, with the same guarantees every time (a retry can never post twice).
 - **Stay in control**: commits wait for approval, a stuck run pauses for a person to take over, and a changed screen produces a repair proposal a person approves.
 
-> Status: in active development on `dev`. A hosted demo is still to come. Measured results are [at the end](#results).
+> Status: in active development on `dev`. **Live practice clinic:** <https://larkspur-clinic-ops.onrender.com> (try `/legacy/login` or `/app/`; free hosting, so the first visit after a quiet spell takes
+> about a minute to wake, and its fake data resets). The platform itself runs on your machine, as below. Measured results are [at the end](#results).
 
 ## How it works
 
@@ -102,7 +103,7 @@ uv run pytest tests/test_replay_engine.py -q   # one file, in seconds
 uv run python scripts/benchmark.py all         # the measurements below (discovery needs GEMINI_API_KEY)
 ```
 
-434 tests pass. They start the clinic in-process and drive a real Chromium. Eight call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
+434 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
 are built (`cd clinic/modern && npm install && npm run build`). `.github/workflows/ci.yml` runs the offline tests on every push.
 
 ## Reference
@@ -214,4 +215,4 @@ Measured with `uv run python scripts/benchmark.py all --trials 3` against the bu
 - **No LLM at replay:** 0 LLM calls across 180 replays; a replay takes about 1.8 s.
 - **Discovery:** from one sentence, 3 of 4 read-only tasks were recorded in every attempt (9 of 9), in about 11 s and 13k tokens, 6 steps on average, and each recording was right on 10 other records (90 of 90).
   The 4th (the first row of a table with no labels) is refused with a reason, because the recorder cannot yet describe such a cell so that it carries over to other records.
-- **Next:** a hosted demo of the clinic, and discovering a task on the clinic's React skin.
+- **Next:** discovering a task on the clinic's React skin.
