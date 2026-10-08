@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,11 +58,19 @@ SYSTEM_INSTRUCTION = (
     "You are the assistant inside an operations console for back-office systems (a clinic's front desk and billing). "
     "Each tool is one recorded, reviewed task. Call exactly one tool when the user asks for something a tool does, using only values the user "
     "actually gave (or that follow unambiguously from the conversation). If a required value is missing, do NOT call a tool: ask for exactly what "
-    "is missing. Never invent, default or guess a value; never write words like 'unknown' or 'n/a' as a value. If nothing matches the request, say so "
+    "is missing. Write each value in the format its tool asks for: converting what the user wrote is not guessing (4PM becomes 16:00; a date written with slashes "
+    "is month/day/year, so 03/04/2026 becomes 2026-03-04). Never invent, default or guess a value; never write words like 'unknown' or 'n/a' as a value. If nothing matches the request, say so "
     "plainly. For updates, include only the fields the user wants to change. Tasks that commit something wait for a person's approval, so do not "
     "tell the user they are done. Keep replies short."
 )
 HISTORY_TURNS = 8
+
+
+def _today() -> str:
+    """Without it the model answers "tomorrow" from its own idea of the date. Found live: it wrote a date a year in the past, which fits the pattern, so
+    nothing refused it."""
+    now = datetime.now()
+    return f"Today is {now:%A}, {now:%Y-%m-%d}. Work out words like 'tomorrow' or 'next Tuesday' from that."
 
 
 def get_client() -> Any:
@@ -70,12 +79,20 @@ def get_client() -> Any:
     return GeminiClient()
 
 
+def _describe(prop: dict[str, Any]) -> str | None:
+    """The description plus the exact format the capability will accept. Found live: with only the pattern in the schema the model wrote '4PM' and
+    '03/04/2026' for a time and date the task takes as '16:00' and '2026-03-04', and the run was refused."""
+    note = f"Must match the pattern {prop['pattern']}" if prop.get("pattern") else None
+    return " ".join(x for x in (prop.get("description"), note) if x) or None
+
+
 def build_tools() -> tuple[list[types.Tool], dict[str, Any]]:
     declarations, by_name = [], {}
     for artifact in storage.list_artifacts(adir()):
         if artifact.preconditions is None:
             continue  # sign-on is plumbing
-        props = {n: types.Schema(type=_json_type_to_gemini(p.get("type")), description=p.get("description")) for n, p in artifact.input_schema.properties.items()}
+        props = {n: types.Schema(type=_json_type_to_gemini(p.get("type")), description=_describe(p), pattern=p.get("pattern"))
+                 for n, p in artifact.input_schema.properties.items()}
         note = " Changes data." if artifact.safety.risk_level.value == "state_changing" else " Read-only."
         declarations.append(types.FunctionDeclaration(name=_function_name(artifact.capability_id), description=f"{artifact.description}{note} (system: {artifact.target.app_id})",
                                                       parameters=types.Schema(type="OBJECT", properties=props, required=artifact.input_schema.required)))
@@ -119,7 +136,7 @@ def say(body: Say, who: Principal = Depends(require("operator"))) -> dict[str, A
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=body.message)]))
     tools, by_name = build_tools()
     try:
-        response = get_client().generate(contents, tools=tools, system_instruction=SYSTEM_INSTRUCTION, tool_choice="AUTO")
+        response = get_client().generate(contents, tools=tools, system_instruction=f"{SYSTEM_INSTRUCTION} {_today()}", tool_choice="AUTO")
     except Exception as exc:  # noqa: BLE001 -- a model outage must not look like a platform outage
         observability.log("chat.model_error", logging.WARNING, error_type=type(exc).__name__)
         reply = store.chat_add(who.name, "assistant", "I couldn't reach the language model just now. You can still run any task from the catalog.")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 import httpx
@@ -145,9 +146,11 @@ class FakeModel:
     def __init__(self):
         self.script: list = []
         self.seen: list = []
+        self.instructions: list = []
 
     def generate(self, contents, tools=None, system_instruction=None, tool_choice="AUTO"):
         self.seen.append(contents)
+        self.instructions.append(system_instruction)
         kind, payload = self.script.pop(0)
         part = types.Part.from_function_call(name=payload[0], args=payload[1]) if kind == "call" else types.Part.from_text(text=payload)
         return SimpleNamespace(candidates=[SimpleNamespace(content=types.Content(role="model", parts=[part]))])
@@ -184,6 +187,22 @@ def test_chat_asks_instead_of_guessing_and_refuses_invented_values(api, model):
     assert runtime.default_store().list_runs() == []
     # the earlier turns are given to the model, so an answer to its question makes sense
     assert len(model.seen[1]) > 1
+
+
+def test_chat_tells_the_model_the_format_each_input_must_have(api):
+    # found live: shown only a type, the model wrote "4PM" and "03/04/2026" for inputs that must be 16:00 and 2026-03-04, and the run was refused
+    tools, _ = chat_v1.build_tools()
+    reschedule = next(d for d in tools[0].function_declarations if d.name == "clinic__reschedule_appointment")
+    props = reschedule.parameters.properties
+    assert props["time"].pattern == "^[0-9]{2}:[0-9]{2}$" and "^[0-9]{2}:[0-9]{2}$" in props["time"].description
+    assert "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" in props["date"].description
+
+
+def test_chat_tells_the_model_todays_date(api, model):
+    # found live: asked for "tomorrow" with no date to go on, the model wrote a date a year in the past, which fits the pattern, so nothing refused it
+    model.script = [("text", "ok")]
+    say(api, "alex", "move A-20007 to tomorrow at 4pm")
+    assert f"Today is {datetime.now():%A}, {datetime.now():%Y-%m-%d}" in model.instructions[0]
 
 
 def test_chat_never_bypasses_approval_and_cannot_approve(api, model):
