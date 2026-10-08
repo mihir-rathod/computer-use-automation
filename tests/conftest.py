@@ -17,6 +17,9 @@ from pathlib import Path
 # Before anything imports the app: session-scoped fixtures (the in-process API server) start before any per-test fixture and would
 # otherwise run their startup recovery against the developer's real run database (data/runs.db).
 os.environ.setdefault("RUN_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="cua-tests-"), "runs.db"))
+# The tests drive a clinic of their own on this address. Without this, a CLINIC_BASE_URL in .env (pointing the app at the hosted clinic) leaks in below,
+# and the tests run, reset and break things on the hosted one.
+os.environ["CLINIC_BASE_URL"] = "http://localhost:8100"
 
 import httpx
 import pytest

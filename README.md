@@ -105,7 +105,7 @@ uv run pytest tests/test_replay_engine.py -q   # one file, in seconds
 uv run python scripts/benchmark.py all         # the measurements below (discovery needs GEMINI_API_KEY)
 ```
 
-434 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
+451 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
 are built (`cd clinic/modern && npm install && npm run build`). `.github/workflows/ci.yml` runs the offline tests on every push.
 
 ## Reference
