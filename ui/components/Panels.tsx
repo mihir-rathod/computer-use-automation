@@ -39,7 +39,7 @@ export function useDecide(onDone: () => void) {
 }
 
 export function canDecideApproval(role: string | undefined, name: string | undefined, tier: string, requestedBy: string): { ok: boolean; why?: string } {
-  if (name === requestedBy) return { ok: false, why: "You requested this, so someone else has to approve it." };
+  if (name === requestedBy && role !== "admin") return { ok: false, why: "You requested this, so someone else has to approve it." };
   const needed = tier === "supervisor" ? "supervisor" : "operator";
   if (!atLeast(role as never, needed)) return { ok: false, why: `This needs a ${needed}; your key is ${role}.` };
   return { ok: true };

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import httpx
@@ -36,5 +37,13 @@ def console(api_base_url, clinic_base_url, tmp_path, monkeypatch):
     store = runtime.default_store()
     keys = {n: store.create_key(n, r) for n, r in [("alex", "operator"), ("sam", "operator"), ("dana", "supervisor"), ("vic", "viewer"), ("root", "admin")]}
     yield Console(api_base_url, clinic_base_url, keys)
+    # A run left waiting at its irreversible step holds a browser for up to 15 minutes, takes the place of the next test's run, and keeps this process from
+    # exiting. Reject whatever a test left waiting.
+    for waiting in httpx.get(f"{api_base_url}/v1/approvals", headers={"Authorization": f"Bearer {keys['dana']}"}, timeout=10).json()["approvals"]:
+        if waiting["at_step"]:
+            httpx.post(f"{api_base_url}/v1/runs/{waiting['run_id']}/approval/reject", json={"reason": "test cleanup"}, headers={"Authorization": f"Bearer {keys['dana']}"}, timeout=10)
+            end = time.time() + 30  # and let it end: the next test must not find the limit on waiting runs still taken
+            while time.time() < end and httpx.get(f"{api_base_url}/v1/runs/{waiting['run_id']}", headers={"Authorization": f"Bearer {keys['dana']}"}, timeout=10).json()["status"] in ("queued", "running"):
+                time.sleep(0.2)
     httpx.delete(f"{clinic_base_url}/_test/chaos", timeout=5)
     httpx.delete(f"{clinic_base_url}/_test/drift", timeout=5)

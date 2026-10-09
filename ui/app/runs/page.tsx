@@ -52,7 +52,7 @@ export default function Runs() {
             <tbody>{list.map((r) => (
               <tr key={r.id}>
                 <td><Link className="rowlink" href={`/run/?id=${r.id}`}>{r.capability_id}</Link>{r.committed && <span className="tag danger" style={{ marginLeft: 8 }}>committed</span>}</td>
-                <td><StatusPill status={r.status} paused={!!r.paused} /></td><td>{r.requested_by}</td><td className="muted">{ago(r.created_at)}</td>
+                <td><StatusPill status={r.status} paused={!!r.paused} awaiting={!!r.awaiting_approval} /></td><td>{r.requested_by}</td><td className="muted">{ago(r.created_at)}</td>
                 <td className="num muted">{isActive(r.status) ? "…" : duration(r.started_at, r.finished_at)}</td><td className="mono muted small">{r.id.replace("run_", "").slice(0, 22)}</td>
               </tr>))}</tbody></table></div>}
         {list.length >= limit && <div className="card-body"><button className="btn" onClick={() => setLimit(limit + 50)}>Show more</button></div>}

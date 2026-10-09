@@ -6,6 +6,14 @@
 #   supervisor  as above, but the approver must hold the supervisor role.
 # A capability with no irreversible step ignores this.
 #
+# approve_at: when an operator or supervisor approval is asked for.
+#   run   (default) before the run starts: nothing happens until someone approves.
+#   step  the run goes as far as the irreversible step and waits there, with the page in front of the approver, who sees the values that were
+#         entered before approving or rejecting, and may operate the page themselves (click, type, choose, even the final step) and hand the run back.
+#         Rejecting, or nobody deciding in time (escalation.approval_wait_s), stops the run with nothing committed. The person who asked can never
+#         approve or operate it, except an admin. Only a run someone can wait on (console, chat, API) waits at the step; one started by an AI assistant over MCP is approved
+#         before it starts, as with `run`. When too many runs are already waiting, a new one is approved before it starts instead.
+#
 # Approver identity is asserted, not authenticated: the roster says who is allowed to approve, but nothing
 # yet proves the caller is that person. Real authentication arrives with API-key auth (Phase 3).
 version: 1
@@ -32,24 +40,30 @@ escalation:
   enabled: true
   wait_s: 600
   max_paused: 1
+  approval_wait_s: 900        # how long a run waits at an irreversible step for its approval
+  max_awaiting_approval: 3    # how many may wait at once (a browser worker is always left free)
 
 capabilities:
   clinic.issue_refund:
     approval: supervisor
+    approve_at: step
     caps:
       max_param: {amount: 1000.00}     # a hard ceiling, well above the clinic's own $200 approval threshold; refused before any browser starts
       max_commits_per_day: 25
   clinic.write_off_balance:
     approval: supervisor
+    approve_at: step
     caps:
       max_param: {amount: 500.00}
       max_commits_per_day: 10
   clinic.cancel_appointment:
     approval: operator
+    approve_at: step
     caps:
       max_commits_per_day: 100
   clinic.submit_claim:
     approval: operator
+    approve_at: step
   clinic.update_patient_contact:
     approval: live
 

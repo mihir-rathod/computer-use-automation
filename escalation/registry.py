@@ -31,3 +31,9 @@ def paused_sessions() -> list[SessionManager]:
     """Sessions currently waiting for, or being worked on by, a person."""
     from escalation.session_manager import SessionMode
     return [s for s in list(_SESSIONS.values()) if s.mode in (SessionMode.PAUSED, SessionMode.HUMAN_ACTIVE)]
+
+
+def awaiting_approval_sessions() -> list[SessionManager]:
+    """Sessions stopped just before an irreversible step, waiting for someone to approve it."""
+    from escalation.session_manager import SessionMode
+    return [s for s in list(_SESSIONS.values()) if s.mode == SessionMode.AWAITING_APPROVAL]

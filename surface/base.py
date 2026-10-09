@@ -36,6 +36,7 @@ class ObservedState:
     elements: list[ObservedElement]
     screenshot_path: str | None = None
     raw_snapshot: str | None = None
+    text: str | None = None  # what the page says, in reading order; only filled in where a person needs to read the page (an approval)
 
     def to_prompt_text(self) -> str:
         """The numbered list the LLM actually reasons over each turn -- structure, not pixels."""

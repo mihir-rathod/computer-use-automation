@@ -143,9 +143,11 @@ def test_a_running_run_can_be_cancelled(api, clinic_base_url):
 
 
 # ---- approvals with real identities ----------------------------------------------------------------------------------
+# These start every run with pause_for_human=False, as an AI assistant does: it cannot wait at a screen, so its runs are approved before they start. Runs that
+# wait at the step itself are in tests/test_approve_at_step.py.
 
 def test_a_refund_waits_for_a_supervisor_key_and_posts_once(api, clinic_base_url):
-    r = submit(api, "alex", "clinic.issue_refund", REFUND, key="refund-1")
+    r = submit(api, "alex", "clinic.issue_refund", REFUND, key="refund-1", pause_for_human=False)
     run_id = r.json()["id"]
     assert r.status_code == 200 and r.json()["status"] == "pending_approval"
     assert effects(clinic_base_url) == []
@@ -165,12 +167,12 @@ def test_a_refund_waits_for_a_supervisor_key_and_posts_once(api, clinic_base_url
     assert len(effects(clinic_base_url)) == 1
 
     assert api.post(f"/v1/runs/{run_id}/approve", json={"reason": "again"}, headers=api.h("dee")).status_code == 409  # already decided
-    retry = submit(api, "alex", "clinic.issue_refund", REFUND, key="refund-1")
+    retry = submit(api, "alex", "clinic.issue_refund", REFUND, key="refund-1", pause_for_human=False)
     assert retry.json()["result"]["deduplicated"] and len(effects(clinic_base_url)) == 1
 
 
 def test_a_requester_cannot_approve_their_own_run_even_as_a_supervisor(api):
-    run_id = submit(api, "dana", "clinic.issue_refund", REFUND).json()["id"]
+    run_id = submit(api, "dana", "clinic.issue_refund", REFUND, pause_for_human=False).json()["id"]
     r = api.post(f"/v1/runs/{run_id}/approve", json={"reason": "me"}, headers=api.h("dana"))
     assert r.status_code == 409 and "cannot approve" in r.json()["detail"]
     assert api.post(f"/v1/runs/{run_id}/approve", json={"reason": "second pair of eyes"}, headers=api.h("dee")).status_code == 202
@@ -178,7 +180,7 @@ def test_a_requester_cannot_approve_their_own_run_even_as_a_supervisor(api):
 
 
 def test_a_rejected_run_never_executes(api, clinic_base_url):
-    run_id = submit(api, "alex", "clinic.issue_refund", REFUND).json()["id"]
+    run_id = submit(api, "alex", "clinic.issue_refund", REFUND, pause_for_human=False).json()["id"]
     assert api.post(f"/v1/runs/{run_id}/reject", json={"reason": "wrong invoice"}, headers=api.h("dana")).json()["status"] == "rejected"
     assert api.post(f"/v1/runs/{run_id}/approve", json={"reason": "late"}, headers=api.h("dee")).status_code == 409
     assert effects(clinic_base_url) == []
@@ -186,17 +188,17 @@ def test_a_rejected_run_never_executes(api, clinic_base_url):
 
 def test_an_unclear_commit_is_settled_through_the_api_by_a_supervisor(api, clinic_base_url):
     chaos(clinic_base_url, "error500_after", method="POST", path_glob="/legacy/transactions/confirm")
-    run_id = submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1").json()["id"]
+    run_id = submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1", pause_for_human=False).json()["id"]
     api.post(f"/v1/runs/{run_id}/approve", json={"reason": "ok"}, headers=api.h("dana"))
     done = wait(api, run_id)
     assert done["status"] == "needs_review" and len(effects(clinic_base_url)) == 1
 
-    blocked = submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1")
+    blocked = submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1", pause_for_human=False)
     assert blocked.json()["result"]["error"]["code"] == "idempotency_conflict"
     body = {"outcome": "committed", "reason": "refund is in the ledger"}
     assert api.post(f"/v1/runs/{run_id}/resolve", json=body, headers=api.h("sam")).status_code == 403
     assert api.post(f"/v1/runs/{run_id}/resolve", json=body, headers=api.h("dana")).status_code == 200
-    assert submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1").json()["result"]["deduplicated"]
+    assert submit(api, "alex", "clinic.issue_refund", REFUND, key="lost-1", pause_for_human=False).json()["result"]["deduplicated"]
     assert len(effects(clinic_base_url)) == 1
 
 

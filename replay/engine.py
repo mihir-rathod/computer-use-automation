@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Any
 
 from artifacts_lib.schema import (
@@ -61,6 +62,10 @@ class _NeedsReview(Exception):
         self.steps_completed = steps_completed
 
 
+class _Redrive(Exception):
+    """A person at an approval asked the automation to resume: carry out the earlier steps again, from wherever the page is, and come back to the step."""
+
+
 class _DryRunStop(Exception):
     def __init__(self, step_id: str, steps_completed: list[str], outputs: dict[str, Any]):
         self.step_id = step_id
@@ -88,6 +93,7 @@ class ReplayEngine:
         dry_run: bool = False,
         confirmed_steps: set[str] | frozenset[str] = frozenset(),
         checkpoint_timeout_s: float = DEFAULT_CHECKPOINT_TIMEOUT_S,
+        approval_gate: Callable[[Step], str] | None = None,
     ):
         self.surface = surface
         # Whole-run budget, checked before every action and inside every recovery wait. It cannot
@@ -99,6 +105,9 @@ class ReplayEngine:
         # Step ids a human or approval flow has authorised to commit. Only these steps get
         # Action.confirmed=True; the safety policy blocks every other irreversible step.
         self.confirmed_steps = frozenset(confirmed_steps)
+        # Approval at the step itself: called just before an irreversible step that nobody has confirmed. It blocks until a person decides and returns "approved" (the
+        # run does the step) or "completed" (the person did it on the page); it raises SessionCancelled (rejected, timed out, stopped) otherwise.
+        self.approval_gate = approval_gate
         self.checkpoint_timeout_s = checkpoint_timeout_s
         self._deadline_at: float | None = None
         self._commit_step: str | None = None  # irreversible step issued (ambiguous or confirmed)
@@ -223,25 +232,36 @@ class ReplayEngine:
         outputs: dict[str, Any] = {}
         non_idempotent_done = False
 
-        for step in artifact.steps:
-            if step.when_present and step.when_present not in variables:
-                self._skipped.append(step.step_id)
-                self._log_step(step, "skipped")
-                continue
-            if self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE:
-                raise _DryRunStop(step.step_id, completed, dict(outputs))
-            extracted = self._run_step_with_recovery(artifact, step, variables, completed, non_idempotent_done)
-            completed.append(step.step_id)
-            self._log_step(step, "ok")
-            if step.risk_level == StepRiskLevel.IRREVERSIBLE:
-                self._committed = True
-                self._commit_step = step.step_id
-            if step.risk_level == StepRiskLevel.IRREVERSIBLE or not step.idempotent:
-                non_idempotent_done = True
-            if step.output_binding:
-                outputs[step.output_binding] = coerce_output(
-                    extracted, artifact.output_schema.properties.get(step.output_binding)
-                )
+        redrives = 0
+        while True:
+            try:
+                for step in artifact.steps:
+                    if step.when_present and step.when_present not in variables:
+                        self._skipped.append(step.step_id)
+                        self._log_step(step, "skipped")
+                        continue
+                    if self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE:
+                        raise _DryRunStop(step.step_id, completed, dict(outputs))
+                    extracted = self._run_step_with_recovery(artifact, step, variables, completed, non_idempotent_done)
+                    completed.append(step.step_id)
+                    self._log_step(step, "ok")
+                    if step.risk_level == StepRiskLevel.IRREVERSIBLE:
+                        self._committed = True
+                        self._commit_step = step.step_id
+                    if step.risk_level == StepRiskLevel.IRREVERSIBLE or not step.idempotent:
+                        non_idempotent_done = True
+                    if step.output_binding:
+                        outputs[step.output_binding] = coerce_output(
+                            extracted, artifact.output_schema.properties.get(step.output_binding)
+                        )
+                break
+            except _Redrive:
+                # Only ever raised when every step so far can safely be done twice (see _get_approval), so starting over repeats nothing that matters.
+                redrives += 1
+                completed.clear()
+                outputs.clear()
+                self._skipped = []
+                self._log_event("redrive", count=redrives)
 
         if not self._wait_signal(substitute_signal(artifact.success_checkpoint, variables)):
             outcome = self._classify(artifact, variables)
@@ -283,6 +303,10 @@ class ReplayEngine:
         if depth > MAX_RECOVERY_ATTEMPTS_PER_STEP:
             raise _HardFailure(ReplayError(step_id=step.step_id, message="exceeded max recovery attempts", code="max_recovery"), completed_so_far)
         self._check_budget(completed_so_far)
+        if self.approval_gate is not None and not self.dry_run and step.risk_level == StepRiskLevel.IRREVERSIBLE and step.step_id not in self.confirmed_steps:
+            if self._get_approval(step, variables, completed_so_far, non_idempotent_done):
+                self._commit_step = step.step_id
+                return None  # a person took the step on the page and the page confirms it: nothing for the run to do, and above all nothing to repeat
 
         result = self.surface.act(self._build_action(step, variables))
         # A step that must never run twice (irreversible, or declared non-idempotent) and was
@@ -355,6 +379,62 @@ class ReplayEngine:
             return self._run_step_with_recovery(artifact, step, variables, completed_so_far, non_idempotent_done, depth + 1)
 
         raise _HardFailure(ReplayError(step_id=step.step_id, message=failure_message, code=code), completed_so_far)
+
+    def _get_approval(self, step: Step, variables: dict[str, Any], completed: list[str], non_idempotent_done: bool = False) -> bool:
+        """Stops before an irreversible step until a person decides. Returns False once the step is approved (the run goes on to do it), True when the person did the
+        step themselves on the page and the page confirms it. If they reject, or nobody decides, or the run is stopped, it ends here: the step was never issued by the
+        run, so nothing was committed by it. The time spent waiting is not the run's to lose: the budget is extended by it, or a run approved after a long wait would be
+        cut off by its own clock right after the commit."""
+        waited_from = time.monotonic()
+        try:
+            while True:
+                if self.session_manager is not None:
+                    observed = self.surface.perceive()
+                    read_page = getattr(self.surface, "page_text", None)
+                    observed.text = read_page() if read_page else None
+                    self.session_manager.update_observed(observed)
+                try:
+                    outcome = self.approval_gate(step)  # type: ignore[misc]
+                except SessionCancelled as sc:
+                    raise _HardFailure(ReplayError(step_id=step.step_id, message=sc.reason, code=sc.code), completed) from None
+                if outcome == "resumed":
+                    # The person wants the automation to carry on and get back to this step by itself, from wherever they left the page. The steps before it are done
+                    # again from the top, which is only safe if none of them can do harm twice; otherwise say so and ask again.
+                    if non_idempotent_done or self._committed:
+                        if self.session_manager is not None:
+                            self.session_manager.note_for_person("The run cannot go back through its earlier steps: one of them must not be done twice. Reject it, or do the step yourself and press 'I did it'.")
+                        continue
+                    raise _Redrive()
+                if outcome != "completed":
+                    # The approval is for this step on the page the person looked at. If they have since gone elsewhere (a link on the page, say) the step's own
+                    # button is not there to press: do not act, and do not let the run fail for it. Say so, and wait for a decision again.
+                    present = getattr(self.surface, "target_present", None)
+                    if present is not None and step.target is not None and not present(step.target):
+                        if self.session_manager is not None:
+                            self.session_manager.note_for_person(
+                                "That approval was not used: the page is not the one the run stopped on, so the step's button is not on it. "
+                                "Press 'Resume automation' and the run goes back through its earlier steps to this page, or reject it.")
+                        continue
+                    self.confirmed_steps = self.confirmed_steps | {step.step_id}
+                    return False
+                # the person says they did it. The page decides whether that is so.
+                if step.checkpoint is not None and self._wait_signal(substitute_signal(step.checkpoint, variables)):
+                    return True
+                if getattr(self.session_manager, "human_clicks", 0):
+                    raise _NeedsReview(ReplayError(
+                        step_id=step.step_id, code="ambiguous_commit",
+                        message=f"a person worked on the page at step {step.step_id} and handed it back, but the page does not confirm the step; verify against the target's records "
+                                "before running again.",
+                    ), completed)
+                if self.session_manager is not None:
+                    self.session_manager.note_for_person("The page does not show that step done yet. Finish it, or approve to let the run do it.")
+        finally:
+            if self._deadline_at is not None:
+                self._deadline_at += time.monotonic() - waited_from
+
+    def _log_event(self, event: str, **data: Any) -> None:
+        if self.evidence_logger is not None:
+            self.evidence_logger.log("replay", event, capability_id=self._current_capability, **data)
 
     def _log_step(self, step: Step, status: str) -> None:
         if self.evidence_logger is not None:

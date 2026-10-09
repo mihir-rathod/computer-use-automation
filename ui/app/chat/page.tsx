@@ -6,15 +6,16 @@ import { useApi, useAuth, useToast } from "@/lib/hooks";
 import { useWatchPref, watchBody } from "@/lib/watch";
 import { WatchControl } from "@/components/WatchControl";
 import { LiveView } from "@/components/LiveView";
-import type { Capability, Features, RunView } from "@/lib/types";
+import { atLeast, type Capability, type Features, type RunView } from "@/lib/types";
 import { formatValue, label } from "@/lib/format";
 import { Dialog, Empty, ErrorState, PageHead, Skeleton, StatusPill, isActive } from "@/components/ui";
-import { ApprovalActions, ResolveActions } from "@/components/Panels";
-import { IconChat } from "@/components/icons";
+import { Alert, ApprovalActions, ResolveActions, canDecideApproval } from "@/components/Panels";
+import { IconAlert, IconChat, IconClock } from "@/components/icons";
 
 interface Msg { id: number; role: "user" | "assistant"; text: string; run_id: string | null; created_at: string }
 
 function RunCard({ runId }: { runId: string }) {
+  const { me } = useAuth();
   const [every, setEvery] = useState<number | undefined>(2000);
   const run = useApi<RunView>(`/v1/runs/${runId}`, { every });
   const r = run.data;
@@ -26,8 +27,24 @@ function RunCard({ runId }: { runId: string }) {
   const outputs = res?.outputs ? Object.entries(res.outputs).filter(([, v]) => v !== null) : [];
   return (
     <div className="card" style={{ padding: 12, marginTop: 8, width: "100%" }} data-testid="run-card">
-      <div className="row"><StatusPill status={r.status} /><span className="small muted mono">{r.id.replace("run_", "").slice(0, 20)}</span><span className="spacer" /><Link className="small" href={`/run/?id=${r.id}`}>Open run →</Link></div>
-      {r.status === "running" && r.pace_ms > 0 && <div style={{ marginTop: 10 }}><LiveView runId={r.id} active /></div>}
+      <div className="row"><StatusPill status={r.status} paused={!!r.paused} awaiting={!!r.awaiting_approval} /><span className="small muted mono">{r.id.replace("run_", "").slice(0, 20)}</span><span className="spacer" /><Link className="small" href={`/run/?id=${r.id}`}>Open run →</Link></div>
+      {r.paused && (
+        <div style={{ marginTop: 10 }}><Alert tone="wait" icon={<IconAlert width={20} height={20} />} title={r.paused.step_id ? `Stuck at step ${r.paused.step_id}: it needs a person to take over` : "Stuck: it needs a person to take over"}>
+          <span>{r.paused.reason}</span>
+          <span className="small muted">{atLeast(me?.role, "operator") ? <>Open the run, fix what is in the way on its page, then resume the automation.</> : <>An operator can take over from the run page.</>}{r.paused.stops_in_s != null && ` It stops by itself in about ${Math.max(1, Math.ceil(r.paused.stops_in_s / 60))} min.`}</span>
+          {atLeast(me?.role, "operator") && <div><Link className="btn sm primary" href={`/run/?id=${r.id}`}>Take over</Link></div>}
+        </Alert></div>
+      )}
+      {r.awaiting_approval && (() => {
+        const ask = r.awaiting_approval, gate = canDecideApproval(me?.role, me?.name, ask.tier, ask.requested_by);
+        return (
+          <div style={{ marginTop: 10 }}><Alert tone="wait" icon={<IconClock width={20} height={20} />} title={`It stopped before ${ask.description ?? "its last step"}: it needs a ${ask.tier}`}>
+            <span>Nothing has been committed. {gate.ok ? "You can review the page and approve it, or work on the page yourself." : `You can't decide this one: ${gate.why?.toLowerCase()}`}</span>
+            <div><Link className={`btn sm ${gate.ok ? "primary" : ""}`} href={`/run/?id=${r.id}`}>{gate.ok ? "Review and decide" : "See the run"}</Link></div>
+          </Alert></div>
+        );
+      })()}
+      {r.status === "running" && r.pace_ms > 0 && !r.paused && !r.awaiting_approval && <div style={{ marginTop: 10 }}><LiveView runId={r.id} active /></div>}
       {r.status === "pending_approval" && pending && (
         <div className="stack small" style={{ marginTop: 10, gap: 8 }}><span>Nothing has happened yet. It needs a <strong>{pending.tier}</strong> to approve.</span>
           <ApprovalActions run={r} tier={pending.tier} onDone={run.reload} compact /></div>

@@ -422,7 +422,11 @@ class RunStore:
         issued an irreversible step it is needs_review (unknown), otherwise a plain failure; either way it stops blocking."""
         recovered = []
         for run in self._rows("SELECT id, capability_id FROM runs WHERE status IN (?, ?)", (RUNNING, QUEUED)):
-            ambiguous = bool(has_commit_step(run["capability_id"]))
+            # A run that was waiting at its irreversible step for an approval had not issued it, so there is nothing to wonder about: it stopped before committing.
+            waiting_at_step = self._row("SELECT id FROM approvals WHERE run_id=? AND decision IS NULL", (run["id"],)) is not None
+            ambiguous = bool(has_commit_step(run["capability_id"])) and not waiting_at_step
+            if waiting_at_step:
+                self.close_step_approval(run["id"], "cancelled", "the server restarted while it waited; nothing was committed")
             with self._tx() as db:
                 db.execute("UPDATE runs SET status=?, error_code='interrupted', finished_at=? WHERE id=?",
                            (ReplayStatus.NEEDS_REVIEW.value if ambiguous else ReplayStatus.HARD_FAILURE.value, _now(), run["id"]))
@@ -485,7 +489,7 @@ class RunStore:
             "SELECT a.*, r.capability_id, r.params_json FROM approvals a JOIN runs r ON r.id=a.run_id "
             "WHERE a.decision IS NULL AND r.status=? ORDER BY a.id", (PENDING_APPROVAL,))
 
-    def decide(self, run_id: str, decision: Literal["approved", "rejected"], by: str, reason: str) -> dict[str, Any]:
+    def decide(self, run_id: str, decision: Literal["approved", "rejected"], by: str, reason: str, allow_self: bool = False) -> dict[str, Any]:
         """Records the decision. Whether `by` is *allowed* to decide is the caller's check (it needs the
         policy roster); this refuses a self-approval and a decision with no reason."""
         if not reason.strip():
@@ -499,12 +503,35 @@ class RunStore:
             approval = db.execute("SELECT * FROM approvals WHERE run_id=? AND decision IS NULL ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
             if approval is None:
                 raise ApprovalError(f"run {run_id} has no open approval request")
-            if by == approval["requested_by"]:
+            if by == approval["requested_by"] and not allow_self:
                 raise ApprovalError("the person who requested a run cannot approve it")
             db.execute("UPDATE approvals SET decision=?, decided_by=?, decided_at=?, reason=? WHERE id=?",
                        (decision, by, _now(), reason, approval["id"]))
             db.execute("UPDATE runs SET status=? WHERE id=?", (APPROVED if decision == "approved" else REJECTED, run_id))
         return self.get(run_id)  # type: ignore[return-value]
+
+    def decide_at_step(self, run_id: str, decision: Literal["approved", "rejected", "completed", "resumed"], by: str, reason: str, allow_self: bool = False) -> dict[str, Any]:
+        """Records a decision on a run that is waiting at its irreversible step. Same rules as `decide` (a reason, never the requester), but the run is
+        executing, not waiting to start, so its status does not change: the run itself carries on or stops."""
+        if not reason.strip():
+            raise ApprovalError("a decision needs a reason")
+        with self._tx() as db:
+            run = db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+            if run is None:
+                raise ApprovalError(f"unknown run {run_id}")
+            approval = db.execute("SELECT * FROM approvals WHERE run_id=? AND decision IS NULL ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+            if approval is None:
+                raise ApprovalError(f"run {run_id} has no open approval request")
+            if by == approval["requested_by"] and not allow_self:
+                raise ApprovalError("the person who requested a run cannot approve it")
+            db.execute("UPDATE approvals SET decision=?, decided_by=?, decided_at=?, reason=? WHERE id=?", (decision, by, _now(), reason, approval["id"]))
+        return self.approvals_for(run_id)[-1]
+
+    def close_step_approval(self, run_id: str, decision: Literal["expired", "cancelled"], reason: str) -> None:
+        """A run stopped waiting at its irreversible step without anyone deciding (it timed out, or was stopped): close the open request, so the
+        record never shows an approval as still waiting for a run that has gone."""
+        with self._tx() as db:
+            db.execute("UPDATE approvals SET decision=?, decided_by='system', decided_at=?, reason=? WHERE run_id=? AND decision IS NULL", (decision, _now(), reason, run_id))
 
     def close(self) -> None:
         self._conn.close()

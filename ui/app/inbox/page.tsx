@@ -76,10 +76,12 @@ export default function InboxPage() {
           {tab === "approvals" && (d.approvals.length === 0 ? <div className="card"><Empty title="No approvals waiting" /></div> : (
             <div className="stack">{d.approvals.map((a) => (
               <article key={a.run_id} className="card card-pad stack" style={{ gap: 12 }}>
-                <div className="row"><Link className="rowlink" href={`/run/?id=${a.run_id}`} style={{ fontSize: 15 }}>{a.capability_id}</Link><span className="pill wait">Needs a {a.tier}</span><span className="spacer" />
+                <div className="row"><Link className="rowlink" href={`/run/?id=${a.run_id}`} style={{ fontSize: 15 }}>{a.capability_id}</Link><span className="pill wait">Needs a {a.tier}</span>{a.at_step && <span className="tag">stopped at the step</span>}<span className="spacer" />
                   <span className="small muted">asked by <strong>{a.requested_by}</strong> · waiting {age(a.requested_at, now)}</span></div>
                 <dl className="kv small">{Object.entries(a.params).map(([k, v]) => <div key={k} style={{ display: "contents" }}><dt>{label(k)}</dt><dd>{formatValue(v)}</dd></div>)}</dl>
-                <ApprovalActions run={{ id: a.run_id, requested_by: a.requested_by }} tier={a.tier} onDone={inbox.reload} compact />
+                {a.at_step
+                  ? <div className="row"><Link className="btn sm primary" href={`/run/?id=${a.run_id}`}>Review and decide</Link><span className="small muted">It stopped before {a.description ?? "its last step"}; you see the page before deciding.{a.stops_in_s != null && ` Stops by itself in about ${Math.max(1, Math.ceil(a.stops_in_s / 60))} min.`}</span></div>
+                  : <ApprovalActions run={{ id: a.run_id, requested_by: a.requested_by }} tier={a.tier} onDone={inbox.reload} compact />}
               </article>))}</div>))}
           {tab === "needs_review" && (d.needs_review.length === 0 ? <div className="card"><Empty title="No unknown outcomes" /></div> : (
             <div className="stack">{d.needs_review.map((r) => (

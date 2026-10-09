@@ -26,6 +26,10 @@ class Caps(BaseModel):
 
 class CapabilityPolicy(BaseModel):
     approval: ApprovalTier = "live"
+    approve_at: Literal["run", "step"] = Field(
+        default="run", description="When an operator or supervisor approval is asked for. run: before the run starts. step: the run goes as far as the irreversible "
+                                   "step and waits there with the page in front of the approver. Only runs started from the console, chat or API can wait; one started "
+                                   "by an AI assistant over MCP is approved before it starts either way.")
     caps: Caps = Field(default_factory=Caps)
 
 
@@ -79,6 +83,8 @@ class EscalationConfig(BaseModel):
     enabled: bool = True
     wait_s: int = Field(default=600, ge=30, le=3600, description="How long a paused run waits for a person before it is stopped.")
     max_paused: int = Field(default=1, ge=1, le=5, description="How many runs may be waiting for a person at the same time.")
+    approval_wait_s: int = Field(default=900, ge=30, le=7200, description="How long a run waits at its irreversible step for an approval before it is stopped, with nothing committed.")
+    max_awaiting_approval: int = Field(default=3, ge=1, le=10, description="How many runs may be waiting at an irreversible step at the same time (a browser worker is always left free).")
 
 
 class PolicyConfig(BaseModel):
