@@ -18,7 +18,7 @@ export function navFor(role: Role | undefined): { main: NavItem[]; manage: NavIt
 }
 
 export function mayDecideApproval(role: Role | undefined, name: string | undefined, tier: string, requestedBy: string): boolean {
-  if (name === requestedBy) return false;
+  if (name === requestedBy && role !== "admin") return false; // an admin may act on their own request: they answer for everything anyway
   return atLeast(role, tier === "supervisor" ? "supervisor" : "operator");
 }
 

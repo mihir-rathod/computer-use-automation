@@ -9,7 +9,7 @@ export interface InputSchema { properties: Record<string, SchemaProp>; required:
 
 export interface Capability {
   capability_id: string; name: string; description: string; version: string; versions: string[]; app: string;
-  risk: { level: "read_only" | "state_changing"; has_irreversible_step: boolean; irreversible_steps: string[]; approval_required: string | null; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } | null };
+  risk: { level: "read_only" | "state_changing"; has_irreversible_step: boolean; irreversible_steps: string[]; approval_required: string | null; approve_at: "run" | "step" | null; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } | null };
   login: string | null; reviewed: boolean; has_canary: boolean;
   last_canary: { ok: boolean; at: string; detail: string } | null;
   input_schema: InputSchema; output_schema: { properties: Record<string, SchemaProp>; required: string[] };
@@ -27,7 +27,15 @@ export interface RunView {
   committed: boolean; commit_step: string | null; error_code: string | null; created_at: string; started_at: string | null; finished_at: string | null;
   resolution: string | null; params: Record<string, unknown>; evidence: string | null; has_trace: boolean; pace_ms: number; show_window: boolean;
   paused?: { reason: string; step_id: string | null; since: string; stops_in_s: number | null; being_helped: boolean } | null;
+  awaiting_approval?: AwaitingApproval | null;
   approvals?: Approval[]; result?: RunResult | null; repairs?: { id: string; status: string; step_id: string; confident: boolean }[];
+}
+/** A run stopped just before an irreversible step, waiting for someone to approve or reject it. */
+export interface AwaitingApproval { tier: string; requested_by: string; step_id: string | null; description: string | null; since: string; stops_in_s: number | null }
+export interface ApprovalState {
+  awaiting: AwaitingApproval | null; page_moved?: boolean; capability_id?: string; params?: Record<string, unknown>; url: string | null; title?: string | null;
+  fields: { name: string; value: string | null }[]; page_text?: string | null; has_screenshot?: boolean; screenshot_token?: number;
+  elements?: EscalationElement[]; last_action?: { ok: boolean; error: string | null; kind: string } | null;
 }
 export interface RunResult {
   status: string; outputs: Record<string, unknown> | null; business_outcome: string | null; error: { code: string | null; message: string; step_id: string | null } | null;
@@ -37,7 +45,7 @@ export interface TimelineStep { n: number; step_id: string; action: string; desc
 export interface SignOn { status: string; capability_id: string | null; step_id: string | null; screenshot: string | null; actual: string | null }
 export interface Timeline { sign_on: SignOn | null; steps: TimelineStep[]; pauses: { type: string; at: number; reason: string | null }[]; screenshots: string[]; success_expectation: string | null; event_count: number }
 
-export interface PendingApproval { run_id: string; capability_id: string; tier: string; requested_by: string; requested_at: string; params: Record<string, unknown> }
+export interface PendingApproval { run_id: string; capability_id: string; tier: string; requested_by: string; requested_at: string; params: Record<string, unknown>; at_step?: boolean; description?: string; stops_in_s?: number | null }
 export interface Candidate { ref: string; role: string; name: string | null; html_name: string | null; score: number; why: Record<string, number> }
 export interface Locator { strategy: string; value: string }
 export interface RepairProposal {
@@ -51,7 +59,7 @@ export interface CapMetrics { capability_id: string; runs: number; settled: numb
 export interface Metrics { capabilities: CapMetrics[]; totals: { runs: number; pending_approvals: number; pending_repairs: number; failing_canaries: string[] }; browser_pool: Record<string, number> }
 
 export interface ArtifactDiff { capability_id: string; version_a: string; version_b: string; metadata: string[]; schema: string[]; safety: string[]; error_handling: string[]; steps: { kind: string; step: string; summary: string; details: string[] }[] }
-export interface PolicyView { escalation: { enabled: boolean; wait_s: number; max_paused: number }; default_approval: string; discovery: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
+export interface PolicyView { escalation: { enabled: boolean; wait_s: number; max_paused: number; approval_wait_s: number; max_awaiting_approval: number }; default_approval: string; discovery: { non_sandbox_read_only: boolean; max_steps: number; timeout_s: number; commit_wait_s: number }; approvers: Record<string, string>; capabilities: Record<string, { approval: string; approve_at: "run" | "step"; caps: { max_param: Record<string, number>; max_commits_per_day: number | null } }>; tracing: { mode: string; non_sandbox: boolean }; evidence: { screenshots: string; non_sandbox: boolean }; risk_keywords: { commit: string[]; domain: string[] }; redaction: { patterns: string[]; field_names: string[] }; approval_tiers: Record<string, string> }
 export interface KeyRow { id: number; name: string; role: Role; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
 export interface RepairItemLite { id: string; confident: boolean; touches_irreversible_step: boolean }

@@ -167,6 +167,21 @@ class WebSurface(Surface):
             )
         return state
 
+    def target_present(self, target: Any) -> bool:
+        """Whether a step's target can be found on the page as it is now, without touching it."""
+        try:
+            return resolve_target(self.page, target) is not None
+        except Exception:  # noqa: BLE001
+            return False
+
+    def page_text(self, limit: int = 2500) -> str | None:
+        """What the page says, one line per piece of text, for a person deciding whether to approve what is about to happen on it."""
+        try:
+            raw = self.page.locator("body").inner_text(timeout=2000)
+        except Exception:  # noqa: BLE001 -- a convenience for the reader; never let it get in the way of the run
+            return None
+        return "\n".join(line.strip() for line in raw.splitlines() if line.strip())[:limit] or None
+
     _FORM_ROLES = {"textbox", "searchbox", "combobox", "listbox", "spinbutton", "checkbox", "radio"}
 
     def _name_unlabeled_controls(self, elements: list[ObservedElement]) -> None:

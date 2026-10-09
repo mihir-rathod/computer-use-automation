@@ -71,8 +71,8 @@ def build(evidence_dir: Path | None, artifact: Artifact | None, result: dict[str
                 errors[data["step_id"]] = data["error"]
         elif e.get("event_type") == "step" and belongs:
             outcomes[data["step_id"]] = data["status"]
-        elif e.get("event_type") in ("pause", "resume", "cancel"):
-            paused.append({"type": e["event_type"], "at": e["ts"], "reason": data.get("reason"), "step_id": data.get("step_id")})
+        elif e.get("event_type") in ("pause", "resume", "cancel", "approval_requested", "approval_decided", "approval_expired"):
+            paused.append({"type": e["event_type"], "at": e["ts"], "reason": data.get("reason") or data.get("description"), "step_id": data.get("step_id")})
 
     items = []
     if artifact is not None:

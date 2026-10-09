@@ -40,7 +40,7 @@ from evidence_lib.redaction import is_sensitive_field
 from repair.apply import approve_repair, reject_repair
 from repair.propose import RepairProposal
 from replay.result import ReplayStatus
-from runs.approvals import decide_run, resolve_run
+from runs.approvals import decide_at_step, decide_run, may_act_on, resolve_run
 from runs.executor import RunExecutor
 from runs.store import ApprovalError, NotPermitted, RunError
 from safety.config import ROLE_RANK, irreversible_step_ids, required_approval, role_allows
@@ -121,6 +121,7 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
     out["evidence"] = Path(row["evidence_dir"]).name if row.get("evidence_dir") else None
     out["has_trace"] = bool(row.get("evidence_dir")) and (Path(row["evidence_dir"]) / "trace.zip").exists()
     out["paused"] = _paused(row)
+    out["awaiting_approval"] = _awaiting_view(row)
     if detail:
         out["approvals"] = store.approvals_for(row["id"])
         result = store.stored_result(row)
@@ -131,7 +132,7 @@ def run_view(row: dict[str, Any], detail: bool = False) -> dict[str, Any]:
 
 
 def _session(row: dict[str, Any]) -> Any:
-    """The live session of a run that is executing in this process, if it is waiting for or being helped by a person."""
+    """The live session of a run that is executing in this process, if it is waiting for or being helped by a person (stuck, or waiting for an approval)."""
     from escalation.registry import get_session
     from escalation.session_manager import SessionMode
     if row["status"] != "running" or not row.get("evidence_dir"):
@@ -140,8 +141,34 @@ def _session(row: dict[str, Any]) -> Any:
     return session if session is not None and session.mode != SessionMode.AUTOMATION else None
 
 
-def _paused(row: dict[str, Any]) -> dict[str, Any] | None:
+def _stuck(row: dict[str, Any]) -> Any:
+    """The session of a run that is stuck and waiting for a person to take over (not one waiting to be approved: nobody works on the page of that one)."""
+    from escalation.session_manager import SessionMode
     session = _session(row)
+    return session if session is not None and session.mode != SessionMode.AWAITING_APPROVAL else None
+
+
+def _awaiting(row: dict[str, Any]) -> Any:
+    """The session of a run stopped just before an irreversible step, waiting for someone to approve or reject it."""
+    from escalation.session_manager import SessionMode
+    session = _session(row)
+    return session if session is not None and session.mode == SessionMode.AWAITING_APPROVAL else None
+
+
+def _awaiting_view(row: dict[str, Any]) -> dict[str, Any] | None:
+    session = _awaiting(row)
+    if session is None:
+        return None
+    snap = session.snapshot()
+    ask = snap["approval"] or {}
+    since = snap["paused_at"] or time.time()
+    left = max(0, int(snap["approval_wait_s"] - (time.time() - since))) if snap["approval_wait_s"] else None
+    return {"tier": ask.get("tier"), "requested_by": ask.get("requested_by"), "step_id": ask.get("step_id"), "description": ask.get("description"),
+            "since": datetime.fromtimestamp(since, UTC).isoformat(timespec="seconds"), "stops_in_s": left}
+
+
+def _paused(row: dict[str, Any]) -> dict[str, Any] | None:
+    session = _stuck(row)
     if session is None:
         return None
     snap = session.snapshot()
@@ -299,11 +326,17 @@ def cancel_run(run_id: str, who: Principal = Depends(require("operator"))) -> di
 
 def _waiting_session(run_id: str) -> Any:
     row = _get_run(run_id)
-    session = _session(row)
+    session = _stuck(row)
     if session is None:
         raise HTTPException(409, f"run {run_id} is not waiting for a person (it is {row['status']}"
                                  f"{', and no longer paused' if row['status'] == 'running' else ''}); it may have finished, timed out or been stopped")
     return session
+
+
+def _elements(observed: Any) -> list[dict[str, Any]]:
+    """The page as a person operating it sees it: each element with the ref an action uses."""
+    return [{"ref": e.ref, "role": e.role, "name": e.name or e.html_name, "value": e.value, "options": e.options, "disabled": "disabled" in (e.state or {})}
+            for e in (observed.elements if observed else [])]
 
 
 @router.get("/runs/{run_id}/escalation")
@@ -311,13 +344,12 @@ def escalation(run_id: str, _: Principal = Depends(require("operator"))) -> dict
     """What a person needs to help: why the run stopped, the page as the model of the run sees it (its elements, with the refs actions use), and how their
     last action went. Polled while the take-over panel is open."""
     row = _get_run(run_id)
-    session = _session(row)
+    session = _stuck(row)
     if session is None:
         return {"paused": None, "elements": [], "url": None, "last_action": None}
     snap = session.snapshot()
     observed = snap["observed"]
-    elements = [{"ref": e.ref, "role": e.role, "name": e.name or e.html_name, "value": e.value, "options": e.options, "disabled": "disabled" in (e.state or {})}
-                for e in (observed.elements if observed else [])]
+    elements = _elements(observed)
     last = snap["last_human_result"]
     return {"paused": _paused(row), "goal": snap["goal"], "capability_id": snap["capability_id"], "url": observed.url if observed else None,
             "title": observed.title if observed else None, "elements": elements, "has_screenshot": bool(observed and observed.screenshot_path),
@@ -378,14 +410,129 @@ def escalation_stop(run_id: str, who: Principal = Depends(require("operator"))) 
     return {"stopped": True}
 
 
+def _pending_approvals() -> list[dict[str, Any]]:
+    """Everything waiting for an approval: runs that will start once approved, and runs already stopped at their irreversible step with the page in front of
+    whoever approves (`at_step`)."""
+    store = runtime.default_store()
+    items = [{"run_id": a["run_id"], "capability_id": a["capability_id"], "tier": a["tier"], "requested_by": a["requested_by"], "requested_at": a["requested_at"],
+              "params": _mask(json.loads(a["params_json"])), "at_step": False} for a in store.pending_approvals()]
+    for row in store.list_runs(status="running", limit=100):
+        view = _awaiting_view(row)
+        if view is not None:
+            items.append({"run_id": row["id"], "capability_id": row["capability_id"], "tier": view["tier"], "requested_by": view["requested_by"], "requested_at": view["since"],
+                          "params": _mask(json.loads(row["params_json"])), "at_step": True, "description": view["description"], "stops_in_s": view["stops_in_s"]})
+    return items
+
+
 @router.get("/approvals")
 def approvals(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
-    store = runtime.default_store()
-    items = []
-    for a in store.pending_approvals():
-        items.append({"run_id": a["run_id"], "capability_id": a["capability_id"], "tier": a["tier"], "requested_by": a["requested_by"],
-                      "requested_at": a["requested_at"], "params": _mask(json.loads(a["params_json"]))})
-    return {"approvals": items}
+    return {"approvals": _pending_approvals()}
+
+
+# ---- approving a run that is waiting at its irreversible step ----------------------------------------------------------------------
+
+def _awaiting_session(run_id: str) -> Any:
+    row = _get_run(run_id)
+    session = _awaiting(row)
+    if session is None:
+        raise HTTPException(409, f"run {run_id} is not waiting for an approval (it is {row['status']}); it may have finished, timed out or been stopped")
+    return session
+
+
+_FIELD_ROLES = {"textbox", "searchbox", "spinbutton", "combobox", "checkbox", "radio"}
+
+
+@router.get("/runs/{run_id}/approval")
+def step_approval(run_id: str, _: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """What the approver needs: what the run is about to do, and the page it is stopped on, with the values that were entered. Polled while the panel is open."""
+    row = _get_run(run_id)
+    session = _awaiting(row)
+    if session is None:
+        return {"awaiting": None, "fields": [], "url": None}
+    snap = session.snapshot()
+    observed = snap["observed"]
+    fields = [{"name": e.name or e.html_name or e.role, "value": e.value} for e in (observed.elements if observed else []) if e.role in _FIELD_ROLES and e.value not in (None, "")]
+    last = snap["last_human_result"]
+    stopped_on = (snap["approval"] or {}).get("url")
+    moved = bool(stopped_on and observed and observed.url != stopped_on)  # the person has left the page the run stopped on: the step's button is no longer there
+    return {"awaiting": _awaiting_view(row), "page_moved": moved, "capability_id": row["capability_id"], "params": _mask(json.loads(row["params_json"])), "url": observed.url if observed else None,
+            "title": observed.title if observed else None, "fields": fields, "page_text": observed.text if observed else None, "elements": _elements(observed),
+            "has_screenshot": bool(observed and observed.screenshot_path),
+            "screenshot_token": int(last["at"] * 1000) if last else int((snap["paused_at"] or 0) * 1000),
+            "last_action": {"ok": last["ok"], "error": last["error"], "kind": last["kind"]} if last else None}
+
+
+@router.get("/runs/{run_id}/approval/screenshot")
+def step_approval_screenshot(run_id: str, _: Principal = Depends(require("operator"))):
+    from fastapi.responses import FileResponse
+    session = _awaiting_session(run_id)
+    observed = session.snapshot()["observed"]
+    path = Path(observed.screenshot_path) if observed and observed.screenshot_path else None
+    allowed = Path(_get_run(run_id)["evidence_dir"]).resolve()
+    if path is None or not path.exists() or not path.resolve().is_relative_to(allowed):
+        raise HTTPException(404, "no screenshot yet")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+def _decide_step(run_id: str, decision: Literal["approved", "rejected", "completed", "resumed"], body: Decision, who: Principal) -> dict[str, Any]:
+    session = _awaiting_session(run_id)
+    try:
+        decide_at_step(runtime.default_store(), runtime.default_policy(), session, run_id, decision, who.name, body.reason, role=who.role)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+    return {"id": run_id, "decision": decision, "by": who.name}
+
+
+@router.post("/runs/{run_id}/approval/act", status_code=202)
+def step_act(run_id: str, body: EscalationAct, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """One action by the person who answers for this step, performed on the waiting run's own browser session: click, type or choose, by the ref of an element in GET
+    .../approval. It is queued and carried out by the thread that owns the page. Only someone who could approve the step may do it (the right tier, and not the person who
+    asked, unless an admin), and because they answer for it, an action here may be the irreversible step itself. Say so with `.../approval/done` afterwards."""
+    from artifacts_lib.schema import ActionType
+    from surface.base import Action
+
+    session = _awaiting_session(run_id)
+    asked = session.snapshot()["approval"] or {}
+    allowed, why = may_act_on(runtime.default_policy(), asked.get("tier", "supervisor"), asked.get("requested_by", ""), who.name, who.role)
+    if not allowed:
+        raise HTTPException(403, why)
+    observed = session.snapshot()["observed"]
+    if observed is None or body.ref not in {e.ref for e in observed.elements}:
+        raise HTTPException(409, "that element is no longer on the page; the page has changed, so choose again from the current list")
+    if body.kind in ("type", "select") and body.value is None:
+        raise HTTPException(422, f"'{body.kind}' needs a value")
+    kind = {"click": ActionType.CLICK, "type": ActionType.TYPE, "select": ActionType.SELECT}[body.kind]
+    params = {"text": body.value} if kind == ActionType.TYPE else {"value": body.value} if kind == ActionType.SELECT else {}
+    session.request_action(Action(kind=kind, ref=body.ref, params=params, actor="human", confirmed=True), by=who.name)
+    observability.log("run.operated_at_step", logging.WARNING, run_id=run_id, by=who.name, kind=body.kind)
+    return {"queued": True}
+
+
+class Resume(BaseModel):
+    reason: str = Field(default="resumed the automation", min_length=1)
+
+
+@router.post("/runs/{run_id}/approval/resume")
+def step_resume(run_id: str, body: Resume | None = None, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """Hands the run back to the automation without deciding: it goes through its earlier steps again, from whatever page the person left the browser on, comes
+    back to this step and asks again. For when the page was moved away from the step (a link was followed). Only possible when none of the earlier steps must not be done twice."""
+    return _decide_step(run_id, "resumed", Decision(reason=(body.reason if body else "resumed the automation")), who)
+
+
+@router.post("/runs/{run_id}/approval/done")
+def step_done(run_id: str, body: Decision, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    """The person did the step themselves on the page and hands the run back. The run checks that the page confirms it before it goes on, and does not do it again."""
+    return _decide_step(run_id, "completed", body, who)
+
+
+@router.post("/runs/{run_id}/approval/approve")
+def step_approve(run_id: str, body: Decision, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    return _decide_step(run_id, "approved", body, who)
+
+
+@router.post("/runs/{run_id}/approval/reject")
+def step_reject(run_id: str, body: Decision, who: Principal = Depends(require("operator"))) -> dict[str, Any]:
+    return _decide_step(run_id, "rejected", body, who)
 
 
 @router.post("/runs/{run_id}/approve", status_code=202)
@@ -463,6 +610,7 @@ def capability_view(artifact: Any, detail: bool = False) -> dict[str, Any]:
         "versions": storage.list_versions(artifact.capability_id, adir()), "app": artifact.target.app_id,
         "risk": {"level": artifact.safety.risk_level.value, "has_irreversible_step": bool(irreversible), "irreversible_steps": irreversible,
                  "approval_required": cap.approval if irreversible else None,
+                 "approve_at": cap.approve_at if irreversible and cap.approval in ("operator", "supervisor") else None,
                  "caps": cap.caps.model_dump() if irreversible else None},
         "login": artifact.preconditions.requires_capability if artifact.preconditions else None,
         "reviewed": artifact.provenance.reviewed, "has_canary": artifact.canary is not None,
@@ -528,7 +676,7 @@ def policy_view(_: Principal = Depends(require("operator"))) -> dict[str, Any]:
     p = runtime.default_policy()
     return {
         "approvers": p.approvers,
-        "capabilities": {k: {"approval": v.approval, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
+        "capabilities": {k: {"approval": v.approval, "approve_at": v.approve_at, "caps": v.caps.model_dump()} for k, v in p.capabilities.items()},
         "default_approval": p.default_approval, "discovery": p.discovery.model_dump(), "escalation": p.escalation.model_dump(),
         "tracing": p.tracing.model_dump(), "evidence": p.evidence.model_dump(),
         "risk_keywords": p.risk_keywords.model_dump(),
@@ -593,8 +741,7 @@ def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
     """Everything waiting for a person: approvals, runs whose commit outcome is unknown, and repair proposals. One call, so the console can
     show a badge and the inbox page from the same data."""
     store = runtime.default_store()
-    approvals_ = [{"run_id": a["run_id"], "capability_id": a["capability_id"], "tier": a["tier"], "requested_by": a["requested_by"],
-                   "requested_at": a["requested_at"], "params": _mask(json.loads(a["params_json"]))} for a in store.pending_approvals()]
+    approvals_ = _pending_approvals()
     reviews = [run_view(r) for r in store.unresolved_reviews()]
     repairs_ = []
     for r in store.list_repairs("pending"):
@@ -607,7 +754,7 @@ def inbox(_: Principal = Depends(require("viewer"))) -> dict[str, Any]:
                          "description": p.old_target.semantic_description})
     discovery_commits = [{"id": t["id"], "capability_id": t["capability_id"], "created_by": t["created_by"], "request": json.loads(t["commit_request_json"]) if t["commit_request_json"] else None}
                      for t in store.discovery_active() if t["status"] == "awaiting_commit"]
-    paused = [run_view(r) for r in store.list_runs(status="running", limit=100) if _session(r) is not None]
+    paused = [run_view(r) for r in store.list_runs(status="running", limit=100) if _stuck(r) is not None]
     return {"approvals": approvals_, "needs_review": reviews, "repairs": repairs_, "discovery_commits": discovery_commits, "paused": paused,
             "counts": {"approvals": len(approvals_), "needs_review": len(reviews), "repairs": len(repairs_), "discovery_commits": len(discovery_commits), "paused": len(paused),
                        "total": len(approvals_) + len(reviews) + len(repairs_) + len(discovery_commits) + len(paused)}}

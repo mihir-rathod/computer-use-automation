@@ -29,7 +29,7 @@ from artifacts_lib.schema import Artifact
 import observability
 from escalation.operator_console import app as operator_app
 from escalation.registry import register_session, unregister_session
-from escalation.session_manager import SessionManager
+from escalation.session_manager import SessionCancelled, SessionManager
 from evidence_lib.logger import EvidenceLogger
 from evidence_lib.redaction import Redactor
 from repair.propose import propose_repair
@@ -248,6 +248,7 @@ def prepare_run(
     """
     store = store or default_store()
     policy = policy or default_policy()
+    step_approval = False  # set below for a new run; a run resumed after its approval was given before it started needs nothing at the step
 
     if resume_run_id:
         run = store.get(resume_run_id)
@@ -284,6 +285,10 @@ def prepare_run(
                 code="target_mismatch", message=f"{capability_id} is a {artifact.target.app_id} capability but target '{target}' is a {profile_app} app"))
             return Early(early, evidence_dir)
         tier = None if dry_run else required_approval(policy, artifact)
+        # Approval at the step: the run starts now, goes as far as the irreversible step and waits there for a person with the page in front of them. Only a run
+        # someone can wait on (console, chat, API) and only if there is room to wait; anything else is approved before it starts, as it always was.
+        step_approval = (tier in ("operator", "supervisor") and policy.for_capability(capability_id).approve_at == "step" and pause_for_human
+                         and _room_for_approval(policy)(None))
 
         violations = [] if dry_run else check_params(policy, capability_id, params)
         cap = policy.for_capability(capability_id).caps.max_commits_per_day
@@ -302,7 +307,7 @@ def prepare_run(
             result = _early_result(artifact, ReplayStatus.HARD_FAILURE, None, error=ReplayError(
                 code="window_busy", message=f"{MAX_WINDOW_RUNS} runs already have a browser window open on this machine; wait for one to finish or run without the window"))
             return Early(result, evidence_dir)
-        needs_approval = tier in ("operator", "supervisor")
+        needs_approval = tier in ("operator", "supervisor") and not step_approval
         claim = store.begin(capability_id, artifact.version, params, requested_by, None if dry_run else idempotency_key,
                             status=PENDING_APPROVAL if needs_approval else (QUEUED if queued else RUNNING), evidence_dir=str(evidence_dir), target=target,
                             pace_ms=pace_ms, show_window=show_window)
@@ -340,8 +345,9 @@ def prepare_run(
                 headed=headed or show_window, slow_mo=slow_mo, pace_ms=pace_ms, evidence_dir=evidence_dir, operator_port=operator_port,
                 enable_operator_console=enable_operator_console, dry_run=dry_run, cancel_event=cancel_event_ or cancel_event,
                 deadline_s=(deadline_s + len(artifact.steps) * 2 * pace_ms / 1000 + 5) if (deadline_s and pace_ms) else deadline_s,
-                confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") else frozenset(),
+                confirmed_steps=irreversible_step_ids(artifact) if tier in ("operator", "supervisor") and not step_approval else frozenset(),
                 policy=policy, repair_hook=_repair_hook(store, run_id_, repair_llm), artifacts_dir=artifacts_dir, pause_for_human=pause_for_human,
+                step_approval=_StepApproval(store, run_id_, tier, requested_by) if step_approval else None,
             )
         except Exception as exc:  # noqa: BLE001
             # The browser or target could not be reached, or something broke around the engine. Left alone, the run record
@@ -398,6 +404,46 @@ def _room_to_pause(policy: PolicyConfig) -> Callable[[SessionManager], bool]:
         allowed = min(policy.escalation.max_paused, max(0, get_pool().size - 1))  # never let waiting runs take every browser worker
         return len([s for s in paused_sessions() if s is not session]) < allowed
     return may_pause
+
+
+def _room_for_approval(policy: PolicyConfig) -> Callable[[SessionManager | None], bool]:
+    """Runs waiting at an irreversible step each hold a browser worker, so only so many may wait at once, and one worker is always left free."""
+    def room(session: SessionManager | None) -> bool:
+        from escalation.registry import awaiting_approval_sessions
+        allowed = min(policy.escalation.max_awaiting_approval, max(0, get_pool().size - 1))
+        return len([s for s in awaiting_approval_sessions() if s is not session]) < allowed
+    return room
+
+
+@dataclass(frozen=True)
+class _StepApproval:
+    store: RunStore
+    run_id: str
+    tier: str
+    requested_by: str
+
+
+def _step_description(step: Any) -> str:
+    target = getattr(step, "target", None)
+    return (getattr(target, "semantic_description", None) or f"{step.action.value} {step.step_id}") if step is not None else "the irreversible step"
+
+
+def _approval_gate(approval: _StepApproval, session: SessionManager) -> Callable[[Any], str]:
+    """What the engine calls just before an irreversible step. It records the request, waits for a person, and records how it ended. It returns only when the
+    step was approved; a rejection, a timeout or a stop raises, and the step is never issued."""
+    def gate(step: Any) -> str:
+        approval.store.request_approval(approval.run_id, approval.tier, approval.requested_by)
+        try:
+            decision, by, reason = session.await_approval(approval.tier, approval.requested_by, _step_description(step), step.step_id)
+        except SessionCancelled as sc:
+            approval.store.close_step_approval(approval.run_id, "expired" if sc.code == "approval_timeout" else "cancelled", sc.reason)
+            observability.log("approval.closed", logging.WARNING, run_id=approval.run_id, code=sc.code)
+            raise
+        if decision == "rejected":
+            worked = " A person had worked on the page before that, so check the target's records." if session.human_clicks else ""
+            raise SessionCancelled(f"{by} rejected it: “{reason}”. The run did not commit it.{worked}", step.step_id, code="approval_rejected")
+        return decision  # "approved" or "completed"
+    return gate
 
 
 def _on_sign_in_page(page: Any, profile: dict[str, Any]) -> bool:
@@ -460,6 +506,7 @@ def _replay_in_browser(
     enable_operator_console: bool, dry_run: bool, deadline_s: float | None, cancel_event: threading.Event | None,
     confirmed_steps: frozenset[str], policy: PolicyConfig,
     repair_hook: Any = None, artifacts_dir: Path | None = None, pace_ms: int = 0, pause_for_human: bool = False,
+    step_approval: _StepApproval | None = None,
 ) -> ReplayResult:
     """Launch a browser, log in, deterministically replay one capability, write evidence.
 
@@ -535,7 +582,9 @@ def _replay_in_browser(
                 session = SessionManager(
                     evidence_dir.name, surface, evidence_dir, evidence_logger=logger, capability_id=capability_id, goal=None,
                     max_wait_s=float(policy.escalation.wait_s) if pause_for_human else None,
-                    may_pause=_room_to_pause(policy) if pause_for_human else None, pause_on_blocked=not pause_for_human)
+                    may_pause=_room_to_pause(policy) if pause_for_human else None, pause_on_blocked=not pause_for_human,
+                    approval_wait_s=float(policy.escalation.approval_wait_s) if pause_for_human else None,
+                    may_await_approval=_room_for_approval(policy) if pause_for_human else None)
                 register_session(session)
 
             engine = ReplayEngine(
@@ -543,6 +592,7 @@ def _replay_in_browser(
                 reauth_credentials={"username": profile["username"], "password": profile["password"]}, artifacts_dir=artifacts_dir or DEFAULT_ARTIFACTS_DIR,
                 session_manager=session,
                 deadline_s=deadline_s, cancel_event=cancel_event, dry_run=dry_run, confirmed_steps=confirmed_steps,
+                approval_gate=_approval_gate(step_approval, session) if step_approval is not None and session is not None else None,
             )
             result = engine.run(artifact, params)
             if (result.status == ReplayStatus.HARD_FAILURE and result.error and result.error.code in ("locator_unresolved", "checkpoint_failed", "action_failed")

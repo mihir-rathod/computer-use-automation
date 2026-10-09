@@ -10,7 +10,7 @@ import { IconAlert, IconCheck, IconX } from "./icons";
 const CLICKABLE = new Set(["button", "link", "checkbox", "radio", "tab", "menuitem", "option", "switch"]);
 const TYPEABLE = new Set(["textbox", "searchbox", "spinbutton"]);
 
-function ElementRow({ el, runId, onAct, busy }: { el: EscalationElement; runId: string; onAct: (kind: "click" | "type" | "select", ref: string, value?: string) => Promise<void>; busy: boolean }) {
+export function ElementRow({ el, runId, onAct, busy }: { el: EscalationElement; runId: string; onAct: (kind: "click" | "type" | "select", ref: string, value?: string) => Promise<void>; busy: boolean }) {
   const [value, setValue] = useState(el.value ?? "");
   const name = el.name || `unnamed ${el.role}`;
   const kind = TYPEABLE.has(el.role) ? "type" : el.role === "combobox" ? "select" : CLICKABLE.has(el.role) ? "click" : null;
@@ -47,7 +47,7 @@ export function TakeOver({ runId, onChange, onShot }: { runId: string; onChange:
     finally { setBusy(false); }
   }
   const act = async (kind: "click" | "type" | "select", ref: string, value?: string) => { try { await call("act", { kind, ref, value }); } catch { /* shown */ } setTimeout(() => void st.reload(), 700); };
-  const resume = async () => { try { await call("resume"); toast("Handed back. The run carries on."); onChange(); } catch { /* shown */ } };
+  const resume = async () => { try { await call("resume"); toast("Resumed. The run carries on."); onChange(); } catch { /* shown */ } };
   const stop = async () => { try { await call("stop"); toast("The run was stopped."); setConfirmStop(false); onChange(); } catch { /* shown */ } };
   const mins = p.stops_in_s === null ? null : Math.max(1, Math.ceil(p.stops_in_s / 60));
 
@@ -57,7 +57,7 @@ export function TakeOver({ runId, onChange, onShot }: { runId: string; onChange:
       <div className="card-body stack" style={{ gap: 14 }}>
         <Alert tone="wait" icon={<IconAlert width={20} height={20} />} title={p.step_id ? `Stuck at step ${p.step_id}` : "Stuck at the end"}>
           <span>{p.reason}</span>
-          <span className="small muted">You are working on the run&apos;s own browser, the page below. Fix what is in the way, then hand it back: it checks the step is done before it goes on, so nothing you did is repeated.</span>
+          <span className="small muted">You are working on the run&apos;s own browser, the page below. Fix what is in the way, then resume the automation: it checks the step is done before it goes on, so nothing you did is repeated.</span>
         </Alert>
         <div className="grid-2">
           <div className="stack" style={{ gap: 6 }}>
@@ -73,7 +73,7 @@ export function TakeOver({ runId, onChange, onShot }: { runId: string; onChange:
           </div>
         </div>
         <div className="row">
-          <button className="btn primary" disabled={busy} onClick={resume}>Hand it back</button>
+          <button className="btn primary" disabled={busy} onClick={resume}>Resume automation</button>
           <button className="btn danger" disabled={busy} onClick={() => setConfirmStop(true)}>Stop the run</button>
         </div>
       </div>

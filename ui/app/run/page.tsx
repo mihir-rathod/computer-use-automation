@@ -9,6 +9,7 @@ import { ago, duration, formatValue, label, when } from "@/lib/format";
 import { Empty, ErrorState, PageHead, Skeleton, StatusPill, isActive, isSettled } from "@/components/ui";
 import { Alert, ApprovalActions, Lightbox, ResolveActions, StepTimeline } from "@/components/Panels";
 import { TakeOver } from "@/components/TakeOver";
+import { StepApproval } from "@/components/StepApproval";
 import { LiveView } from "@/components/LiveView";
 import { IconClock, IconInbox } from "@/components/icons";
 
@@ -60,7 +61,7 @@ function Run() {
   return (
     <div className="page">
       <PageHead title={r.capability_id} crumb={<Link href="/runs/">← Runs</Link>} sub={<>Run <span className="mono">{r.id}</span> · requested by <strong>{r.requested_by}</strong> {ago(r.created_at)}{r.version && ` · artifact v${r.version}`}</>}>
-        <StatusPill status={r.status} paused={!!r.paused} />
+        <StatusPill status={r.status} paused={!!r.paused} awaiting={!!r.awaiting_approval} />
         {(r.status === "queued" || r.status === "running") && atLeast(me?.role, "operator") && <button className="btn sm danger" onClick={cancel}>Cancel run</button>}
       </PageHead>
 
@@ -85,9 +86,11 @@ function Run() {
       )}
       {r.status === "business_outcome" && res && <Alert tone="info" title={`Answered: ${label(res.business_outcome ?? "")}`}><span>This is a normal answer from the system, not an error.</span></Alert>}
       {r.status === "dry_run" && <Alert tone="info" title="Rehearsal only"><span>It stopped before the irreversible step. Nothing was changed.</span></Alert>}
+      {r.awaiting_approval && atLeast(me?.role, "operator") && <StepApproval runId={r.id} ask={r.awaiting_approval} onChange={refresh} onShot={(url, alt) => setShot({ url, alt })} />}
+      {r.awaiting_approval && !atLeast(me?.role, "operator") && <Alert tone="wait" icon={<IconClock width={20} height={20} />} title={`Waiting for a ${r.awaiting_approval.tier} to approve`}><span>The run stopped just before {r.awaiting_approval.description ?? "its last step"}. Nothing has been committed. An operator or supervisor can review and decide from this page.</span></Alert>}
       {r.paused && atLeast(me?.role, "operator") && <TakeOver runId={r.id} onChange={refresh} onShot={(url, alt) => setShot({ url, alt })} />}
       {r.paused && !atLeast(me?.role, "operator") && <Alert tone="wait" title="This run needs a person"><span>{r.paused.reason}. An operator can take over from this page.</span></Alert>}
-      {active && !r.paused && <Alert tone="info" title={r.status === "queued" ? "Waiting for a browser to be free" : `Running · ${done} of ${steps.length || "?"} steps done`}><span className="small">This page updates by itself.{r.pace_ms > 0 && ` Watch mode is on (${r.pace_ms} ms around each action).`}{r.show_window && " A browser window is open on the machine running the server."}</span></Alert>}
+      {active && !r.paused && !r.awaiting_approval && <Alert tone="info" title={r.status === "queued" ? "Waiting for a browser to be free" : `Running · ${done} of ${steps.length || "?"} steps done`}><span className="small">This page updates by itself.{r.pace_ms > 0 && ` Watch mode is on (${r.pace_ms} ms around each action).`}{r.show_window && " A browser window is open on the machine running the server."}</span></Alert>}
       {active && r.status === "running" && atLeast(me?.role, "operator") && (r.pace_ms > 0 || (tl.data?.screenshots.length ?? 0) > 0) && (
         <section className="card" aria-label="Live view"><div className="card-head"><h2>Live view</h2><span className="small muted">outlined in amber: what it is touching</span></div>
           <div className="card-body"><LiveView runId={r.id} active big onOpen={(url, alt) => setShot({ url, alt })} /></div></section>

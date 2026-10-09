@@ -11,7 +11,7 @@ Built with Python 3.12, FastAPI, Playwright, Pydantic and SQLite; a Next.js (Rea
 
 - **Discover** a task from one sentence, on a practice system, and review the recording before anyone can run it.
 - **Replay** it for any record, in about 2 seconds, with the same guarantees every time (a retry can never post twice).
-- **Stay in control**: commits wait for approval, a stuck run pauses for a person to take over, and a changed screen produces a repair proposal a person approves.
+- **Stay in control**: a run stops just before something it cannot undo, so a person can read the page and approve it; a stuck run pauses for a person to take over; and a changed screen produces a repair proposal a person approves.
 
 > **Live practice clinic:** <https://larkspur-clinic-ops.onrender.com> (try `/legacy/login` or `/app/`; free hosting, so the first visit after a quiet spell takes about a minute to wake,
 > and its fake data resets). The platform itself runs on your machine, as below. Measured results are [at the end](#results).
@@ -90,8 +90,9 @@ uv run python cli.py keys create --name dana --role supervisor
 ## Try it (about 10 minutes)
 
 1. **Run a task.** Sign in as `alex`, open *Look up a patient by MRN*, enter MRN `LK-100002`, choose *Slow*, and press Run. Watch the amber outline follow each step, then read the result and the step timeline.
-2. **See approval.** Open *Issue a refund*, enter invoice `INV-30001`, amount `25.00`, reason *duplicate payment*. It waits for a supervisor. Sign in as `dana` (a different key: you cannot approve your own request),
-   open the **Inbox**, and approve it. It runs once, and the clinic's audit log at <http://localhost:8100/_test/audit> shows exactly one refund.
+2. **See approval.** Open *Issue a refund*, enter invoice `INV-30001`, amount `25.00`, reason *duplicate payment*. The run goes as far as the refund button and stops there, waiting for a supervisor. Sign in as `dana` (a different key:
+   you cannot approve your own request), open the **Inbox** and choose *Review and decide*. You see the page and the values entered. Approve it and the run commits once (the clinic's audit log at <http://localhost:8100/_test/audit> shows exactly
+   one refund), or click *Confirm* on the page yourself and press *I did it myself*. Reject it, or let it time out, and the run commits nothing.
 3. **Discover a task.** As `dana`, open **Discover** and type: *Look up appointment A-20002 and tell me the patient and the provider.* Draft it, start discovery, and watch the LLM work. Review the recorded steps,
    make it available, then run it as `alex` for another appointment (such as `A-20004`). Needs `GEMINI_API_KEY`.
 4. **Change the screen.** Open the clinic's control panel, <http://localhost:8100/_test/panel>, and set UI drift to level 2 (labels renamed). Run that patient lookup again: it fails because the page changed, and the **Inbox**
@@ -105,7 +106,7 @@ uv run pytest tests/test_replay_engine.py -q   # one file, in seconds
 uv run python scripts/benchmark.py all         # the measurements below (discovery needs GEMINI_API_KEY)
 ```
 
-451 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
+484 tests pass. They start the clinic in-process and drive a real Chromium. Seven call the real LLM and skip without `GEMINI_API_KEY`. The browser tests for the console and the clinic's React skin skip until those
 are built (`cd clinic/modern && npm install && npm run build`). `.github/workflows/ci.yml` runs the offline tests on every push.
 
 ## Reference
@@ -126,6 +127,12 @@ Keyboard: `g` then a letter to jump between pages, `/` to search, `?` for help. 
 
 A run that gets stuck pauses instead of failing. An operator opens it from the Inbox, acts on the run's own browser (click, type, choose), then hands it back or stops it. It waits a limited time, and only one run
 may wait at once (`escalation:` in `safety/policy.yaml`).
+
+A task that cannot be undone (a refund, a claim, a write-off, a cancellation) is set to `approve_at: step` in `safety/policy.yaml`: the run goes as far as that step and waits for an operator or supervisor, who sees the
+page before deciding. The approver can also work on the page themselves (click, type, choose, even the final step). *I did it myself* hands the run back after they did the step, and the run checks the page confirms it. *Resume automation* hands it back
+to carry on by itself: if the page was moved away from the step (a link was followed), the run goes back through its earlier steps to the same page and asks again. Neither repeats something that was already done.
+The person who asked can never approve it, except an admin, who may decide their own request. A timeout or a rejection stops the run with nothing committed. Only runs someone can wait on (console, chat, API) stop at the step; a run started by an AI
+assistant, or one that finds too many already waiting, is approved before it starts instead (`approve_at: run`).
 </details>
 
 <details>
@@ -148,17 +155,18 @@ A task declared read-only can never commit. If the LLM reaches the one irreversi
 ```bash
 curl -s -X POST localhost:8020/v1/runs -H "Authorization: Bearer $ALEX" -H "Idempotency-Key: refund-INV-30001-1" -H 'content-type: application/json' \
   -d '{"capability_id":"clinic.issue_refund","target":"clinic","params":{"invoice":"INV-30001","amount":"25.00","reason":"duplicate_payment"}}'
-curl -s -X POST localhost:8020/v1/runs/RUN_ID/approve -H "Authorization: Bearer $DANA" -H 'content-type: application/json' -d '{"reason":"invoice checked"}'
+curl -s -X POST localhost:8020/v1/runs/RUN_ID/approval/approve -H "Authorization: Bearer $DANA" -H 'content-type: application/json' -d '{"reason":"invoice checked"}'
 ```
 
-A run returns `202` and an id at once; follow it with `GET /v1/runs/{id}` or the `/events` stream. The caller never supplies a URL or credentials; the target profile decides.
+A run returns `202` and an id at once; follow it with `GET /v1/runs/{id}` or the `/events` stream. A refund stops at its irreversible step (`awaiting_approval` in the run); `GET /v1/runs/{id}/approval` shows the page it stopped on.
+With `"pause_for_human": false` it is approved before it starts instead, with `POST /v1/runs/{id}/approve`. The caller never supplies a URL or credentials; the target profile decides.
 </details>
 
 <details>
 <summary><b>AI assistants (MCP)</b></summary>
 
 `mcp_server.py` exposes every recorded task as an MCP tool, as a thin client of `/v1` under the assistant's own key, so the key's role is its ceiling. There is no tool to approve, a task that commits
-requires an idempotency key, and an assistant that gets stuck fails at once. For Claude Desktop (the API and the clinic must be running):
+requires an idempotency key, a task that needs approval is approved before it starts (an assistant cannot wait at a screen), and an assistant that gets stuck fails at once. For Claude Desktop (the API and the clinic must be running):
 
 ```json
 {"mcpServers": {"capability-platform": {"command": "uv", "args": ["--directory", "/absolute/path/to/this/repo", "run", "python", "mcp_server.py"],

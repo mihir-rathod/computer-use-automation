@@ -89,8 +89,8 @@ def test_the_inbox_badge_counts_only_what_this_person_can_decide(page, console):
     page.get_by_label("Invoice").fill("INV-30001")
     page.get_by_label("Amount").fill("15.00")
     page.get_by_label("Reason").select_option("duplicate_payment")
-    page.get_by_role("button", name="Submit for supervisor approval").click()
-    expect(page.get_by_text("Waiting for a supervisor to approve")).to_be_visible()
+    page.get_by_role("button", name="Run", exact=True).click()
+    expect(page.get_by_role("heading", name="Waiting for your approval")).to_be_visible()  # it ran up to the refund button and stopped
 
     console.open(page, "sam" if "sam" in console.keys else "alex", "")
     expect(page.locator(".nav .badge")).to_have_count(0)                              # the requester cannot approve it, so nothing is waiting for them
@@ -100,13 +100,13 @@ def test_the_inbox_badge_counts_only_what_this_person_can_decide(page, console):
 
 def test_the_form_checks_input_before_anything_is_sent_and_says_what_is_wrong(page, console):
     console.open(page, "alex", "task/?id=clinic.issue_refund")
-    page.get_by_role("button", name="Submit for supervisor approval").click()
+    page.get_by_role("button", name="Run", exact=True).click()
     expect(page.get_by_text("Required").first).to_be_visible()
 
     page.get_by_label("Invoice").fill("nope")
     page.get_by_label("Amount").fill("12")
     page.get_by_label("Reason").select_option("billing_error")
-    page.get_by_role("button", name="Submit for supervisor approval").click()
+    page.get_by_role("button", name="Run", exact=True).click()
     expect(page.get_by_text("Doesn't match the expected format, e.g. INV-00000")).to_be_visible()
     assert effects(console.clinic, "refund.request_approval") == [] and httpx.get(f"{console.base}/v1/health").status_code == 200
 
@@ -142,33 +142,33 @@ def test_a_partial_update_changes_only_what_was_filled_in(page, console):
     assert after["phone"] == "(206) 555-0123" and (after["email"], after["address"]) == (before["email"], before["address"])
 
 
-def test_a_refund_waits_then_a_supervisor_approves_it_with_a_reason(page, console):
+def test_a_refund_stops_at_its_step_then_a_supervisor_approves_it_with_a_reason(page, console):
     console.open(page, "alex", "task/?id=clinic.issue_refund")
     page.get_by_label("Invoice").fill("INV-30001")
     page.get_by_label("Amount").fill("15.00")
     page.get_by_label("Reason").select_option("duplicate_payment")
-    page.get_by_role("button", name="Submit for supervisor approval").click()
+    expect(page.get_by_text("It runs up to the final step, then waits for a supervisor to approve it.")).to_be_visible()
+    page.get_by_role("button", name="Run", exact=True).click()
 
-    expect(page.get_by_text("Waiting for a supervisor to approve")).to_be_visible()
+    expect(page.get_by_role("heading", name="Waiting for your approval")).to_be_visible()
     assert effects(console.clinic) == []
-    expect(page.get_by_role("button", name="Approve and run")).to_be_disabled()      # the requester cannot approve their own run
+    expect(page.get_by_role("button", name="Approve", exact=True)).to_be_disabled()      # the requester cannot approve their own run
     expect(page.get_by_text("You requested this").first).to_be_visible()
-    run_url = page.url
 
     console.open(page, "vic", "inbox/")
     expect(page.locator(".pill.wait", has_text="Needs a supervisor")).to_be_visible()
-    expect(page.get_by_role("button", name="Approve and run")).to_be_disabled()      # a viewer cannot either
+    assert page.get_by_role("button", name="Approve and run").count() == 0               # a viewer is not offered a decision
     page.get_by_text("alex").first.wait_for()
 
     console.open(page, "dana", "inbox/")
     expect(page.locator(".nav .badge")).to_have_text("1")
-    page.get_by_role("button", name="Approve and run").click()
-    page.get_by_role("button", name="Approve and run").last.click()               # the dialog's confirm button, with no reason yet
+    page.get_by_role("link", name="Review and decide").click()
+    page.get_by_role("button", name="Approve", exact=True).click()
+    page.get_by_role("button", name="Approve it").click()                                # the dialog's confirm button, with no reason yet
     expect(page.get_by_text("A reason is required")).to_be_visible()
     page.locator("dialog[open]").get_by_label("Reason").fill("Invoice checked against the ledger")
-    page.get_by_role("button", name="Approve and run").last.click()
+    page.get_by_role("button", name="Approve it").click()
 
-    page.goto(run_url)
     expect(page.get_by_text("Succeeded").first).to_be_visible()
     expect(page.get_by_text("Yes, at step")).to_be_visible()
     expect(page.get_by_text("Invoice checked against the ledger")).to_be_visible()
@@ -197,7 +197,7 @@ def test_an_unknown_commit_outcome_is_settled_from_the_inbox(page, console):
 
     with TestClient(app) as c:
         h = {"Authorization": f"Bearer {console.keys['alex']}"}
-        run_id = c.post("/v1/runs", json={"capability_id": "clinic.issue_refund", "target": "clinic", "params": {"invoice": "INV-30001", "amount": "12.00", "reason": "duplicate_payment"}}, headers=h).json()["id"]
+        run_id = c.post("/v1/runs", json={"capability_id": "clinic.issue_refund", "target": "clinic", "params": {"invoice": "INV-30001", "amount": "12.00", "reason": "duplicate_payment"}, "pause_for_human": False}, headers=h).json()["id"]
         c.post(f"/v1/runs/{run_id}/approve", json={"reason": "ok"}, headers={"Authorization": f"Bearer {console.keys['dana']}"})
         import time
         for _ in range(60):
