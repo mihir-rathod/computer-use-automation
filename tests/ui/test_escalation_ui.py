@@ -41,7 +41,7 @@ def test_a_stuck_run_is_found_in_the_inbox_and_fixed_by_taking_over(page, consol
     page.get_by_label("Text for mrn").fill("LK-100002")
     page.get_by_role("button", name="Type into mrn").click()
     expect(page.get_by_text("That worked.")).to_be_visible()
-    page.get_by_role("button", name="Hand it back").click()
+    page.get_by_role("button", name="Resume automation").click()
 
     expect(page.get_by_text("Succeeded")).to_be_visible()
     expect(page.get_by_text("Pell, Jordan")).to_be_visible()
@@ -58,5 +58,5 @@ def test_a_person_can_stop_a_stuck_run(page, console, stuck_run):
 def test_a_viewer_sees_that_a_run_needs_a_person_but_cannot_take_over(page, console, stuck_run):
     console.open(page, "vic", f"run/?id={stuck_run}")
     expect(page.get_by_text("An operator can take over from this page.")).to_be_visible()
-    assert page.get_by_role("button", name="Hand it back").count() == 0
+    assert page.get_by_role("button", name="Resume automation").count() == 0
     httpx.post(f"{console.base}/v1/runs/{stuck_run}/escalation/stop", headers={"Authorization": f"Bearer {console.keys['alex']}"}, timeout=10)

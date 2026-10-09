@@ -1,0 +1,368 @@
+{
+  "artifact_schema_version": "1.0",
+  "capability_id": "clinic.look_up_appointment",
+  "version": "1.0.0",
+  "name": "Look up appointment",
+  "description": "Look up an appointment by its ID and return its date, time, patient, and provider.",
+  "target": {
+    "app_id": "clinic",
+    "surface_type": "web",
+    "base_url": "http://127.0.0.1:57252",
+    "vendor_product": "clinic",
+    "tenant_id": null
+  },
+  "preconditions": {
+    "requires_capability": "clinic.login",
+    "note": "Assumes a signed-on session."
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "appointment_id": {
+        "type": "string",
+        "description": "The appointment ID to look up",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "appointment_id"
+    ],
+    "at_least_one_of": []
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "done"
+        ]
+      },
+      "date": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The date of the appointment"
+      },
+      "time": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The time of the appointment"
+      },
+      "patient": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The patient name"
+      },
+      "provider": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The provider name"
+      }
+    },
+    "required": [
+      "status"
+    ],
+    "at_least_one_of": []
+  },
+  "success_checkpoint": {
+    "type": "text_present",
+    "value": "Appointment",
+    "target": null,
+    "description": null
+  },
+  "steps": [
+    {
+      "step_id": "s1",
+      "action": "navigate",
+      "target": null,
+      "params": {
+        "url": "/legacy/menu"
+      },
+      "output_binding": null,
+      "checkpoint": null,
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s2",
+      "action": "click",
+      "target": {
+        "semantic_description": "Find appointment",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "link[name='Find appointment']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "link",
+          "name": "Find appointment",
+          "ordinal": 3,
+          "same_role_count": 10,
+          "before": [
+            "Patient lookup",
+            "Today's schedule"
+          ],
+          "after": [
+            "Find invoice",
+            "Cancel appointment"
+          ],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/fn/find",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s3",
+      "action": "type",
+      "target": {
+        "semantic_description": "Appointment no.",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "textbox[name='Appointment no.']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          },
+          {
+            "strategy": "css",
+            "value": "#fn-number",
+            "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+          }
+        ],
+        "hints": {
+          "role": "textbox",
+          "name": "Appointment no.",
+          "ordinal": 0,
+          "same_role_count": 1,
+          "before": [
+            "Find appointment",
+            "Appointment no."
+          ],
+          "after": [
+            "Continue"
+          ],
+          "html_name": null,
+          "id": "fn-number"
+        }
+      },
+      "params": {
+        "text": "{{appointment_id}}"
+      },
+      "output_binding": null,
+      "checkpoint": {
+        "type": "element_value_equals",
+        "value": "{{appointment_id}}",
+        "target": {
+          "semantic_description": "Appointment no.",
+          "locators": [
+            {
+              "strategy": "role",
+              "value": "textbox[name='Appointment no.']",
+              "note": "Primary: accessible role + name, computed at discovery time."
+            },
+            {
+              "strategy": "css",
+              "value": "#fn-number",
+              "note": "Fallback: element id present at discovery time, not guaranteed stable across tenants."
+            }
+          ],
+          "hints": {
+            "role": "textbox",
+            "name": "Appointment no.",
+            "ordinal": 0,
+            "same_role_count": 1,
+            "before": [
+              "Find appointment",
+              "Appointment no."
+            ],
+            "after": [
+              "Continue"
+            ],
+            "html_name": null,
+            "id": "fn-number"
+          }
+        },
+        "description": null
+      },
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s4",
+      "action": "click",
+      "target": {
+        "semantic_description": "Continue",
+        "locators": [
+          {
+            "strategy": "role",
+            "value": "button[name='Continue']",
+            "note": "Primary: accessible role + name, computed at discovery time."
+          }
+        ],
+        "hints": {
+          "role": "button",
+          "name": "Continue",
+          "ordinal": 1,
+          "same_role_count": 2,
+          "before": [
+            "Appointment no.",
+            "Appointment no."
+          ],
+          "after": [],
+          "html_name": null,
+          "id": null
+        }
+      },
+      "params": {},
+      "output_binding": null,
+      "checkpoint": {
+        "type": "url_matches",
+        "value": "**/legacy/appointments/{{appointment_id}}",
+        "target": null,
+        "description": null
+      },
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s5",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Appointment' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Appointment\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Appointment"
+        }
+      },
+      "params": {},
+      "output_binding": "date",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s6",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Appointment' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Appointment\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Appointment"
+        }
+      },
+      "params": {},
+      "output_binding": "time",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s7",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Patient' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Patient\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Patient"
+        }
+      },
+      "params": {},
+      "output_binding": "patient",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    },
+    {
+      "step_id": "s8",
+      "action": "extract",
+      "target": {
+        "semantic_description": "value cell beside the 'Provider' label",
+        "locators": [
+          {
+            "strategy": "xpath",
+            "value": "(//*[self::td or self::th][normalize-space(.)=\"Provider\"]/following-sibling::*[self::td or self::th][1])[1]",
+            "note": "Anchored to the label cell to its left: a cell's own text is record data and changes between runs."
+          }
+        ],
+        "hints": {
+          "label": "Provider"
+        }
+      },
+      "params": {},
+      "output_binding": "provider",
+      "checkpoint": null,
+      "risk_level": "safe",
+      "when_present": null,
+      "idempotent": true
+    }
+  ],
+  "error_handling": {
+    "business_outcomes": [],
+    "recoverable": [],
+    "hard_failure_default": "stop_and_escalate"
+  },
+  "safety": {
+    "risk_level": "read_only",
+    "requires_confirmation": false
+  },
+  "provenance": {
+    "discovered_by": "gemini-flash-lite-latest",
+    "discovery_run_id": "discover_20261008T184258_f1d7fa",
+    "created_at": "2026-10-08T18:43:09.907726Z",
+    "reviewed": false,
+    "note": "Discovered from the console by dana on 2026-10-08 from a clinic session. Replayed once with the example values, without the model. Success is recognised by the text “Appointment”, which the system chose from the page the answer was read from.  Not yet human-reviewed.",
+    "parent_version": null,
+    "approved_by": null,
+    "change_note": null,
+    "repair_proposal_id": null,
+    "commit_approvals": []
+  },
+  "success_output_defaults": {
+    "status": "done"
+  },
+  "canary": null
+}

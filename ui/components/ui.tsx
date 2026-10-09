@@ -19,8 +19,8 @@ const STATUS: Record<string, { tone: Tone; text: string; icon: ReactNode }> = {
   dry_run: { tone: "idle", text: "Dry run", icon: <IconEye /> },
   abandoned: { tone: "idle", text: "Abandoned", icon: <IconX /> },
 };
-export function StatusPill({ status, paused }: { status: string; paused?: boolean }) {
-  const s = paused ? { tone: "wait" as Tone, text: "Needs a person", icon: <IconAlert /> } : STATUS[status] ?? { tone: "idle" as Tone, text: label(status), icon: <IconDot /> };
+export function StatusPill({ status, paused, awaiting }: { status: string; paused?: boolean; awaiting?: boolean }) {
+  const s = awaiting ? { tone: "wait" as Tone, text: "Needs approval", icon: <IconClock /> } : paused ? { tone: "wait" as Tone, text: "Needs a person", icon: <IconAlert /> } : STATUS[status] ?? { tone: "idle" as Tone, text: label(status), icon: <IconDot /> };
   return <span className={`pill ${s.tone}`}>{s.icon}{s.text}</span>;
 }
 export const isActive = (status: string) => status === "queued" || status === "running" || status === "approved";

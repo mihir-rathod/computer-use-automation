@@ -26,7 +26,9 @@ function Task() {
         <TaskForm key={c.capability_id} cap={c} targets={targets.data.targets} />
         <div className="stack">
           <section className="card"><div className="card-head"><h2>What to expect</h2></div><div className="card-body stack">
-            {c.risk.has_irreversible_step ? <p>This <strong>commits something that cannot be undone from here</strong>. It is held until a {c.risk.approval_required} approves it, and a retry with the same key cannot do it twice.</p>
+            {c.risk.has_irreversible_step ? (c.risk.approve_at === "step"
+              ? <p>This <strong>commits something that cannot be undone from here</strong>. It runs up to that last step and stops there: a {c.risk.approval_required} sees the page and approves or rejects it, nothing is committed until then, and a retry with the same key cannot do it twice.</p>
+              : <p>This <strong>commits something that cannot be undone from here</strong>. It is held until a {c.risk.approval_required} approves it, and a retry with the same key cannot do it twice.</p>)
               : c.risk.level === "state_changing" ? <p>This changes data but can be corrected, and runs straight away.</p> : <p>This only reads. It runs straight away and changes nothing.</p>}
             {caps && (Object.keys(caps.max_param).length > 0 || caps.max_commits_per_day) && <p className="small muted">Limits: {Object.entries(caps.max_param).map(([k, v]) => `${label(k)} up to ${v}`).join(", ")}{caps.max_commits_per_day ? `${Object.keys(caps.max_param).length ? "; " : ""}${caps.max_commits_per_day} a day` : ""}.</p>}
             <div><div className="label">You get back</div><div className="chips" style={{ marginTop: 6 }}>{Object.keys(c.output_schema.properties).map((k) => <span key={k} className="tag">{label(k)}</span>)}</div></div>

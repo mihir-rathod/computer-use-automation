@@ -104,7 +104,7 @@ def test_watching_is_remembered_through_an_approval(api, monkeypatch):
 
     monkeypatch.setattr(runtime, "_replay_in_browser", fake)
     refund = {"invoice": "INV-30001", "amount": "10.00", "reason": "duplicate_payment"}
-    run = submit(api, "alex", "clinic.issue_refund", refund, pace_ms=1200).json()
+    run = submit(api, "alex", "clinic.issue_refund", refund, pace_ms=1200, pause_for_human=False).json()
     assert run["status"] == "pending_approval" and run["pace_ms"] == 1200
     api.post(f"/v1/runs/{run['id']}/approve", json={"reason": "ok"}, headers=api.h("dana"))
     wait(api, run["id"])

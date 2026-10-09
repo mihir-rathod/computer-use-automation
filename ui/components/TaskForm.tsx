@@ -27,6 +27,7 @@ export function TaskForm({ cap, targets }: { cap: Capability; targets: Target[] 
   const [watch, setWatch] = useWatchPref();
   const errors = useMemo(() => validate(schema, values), [schema, values]);
   const commits = cap.risk.has_irreversible_step;
+  const atStep = commits && cap.risk.approve_at === "step"; // it starts now and stops at the irreversible step, instead of waiting to be approved first
   const names = Object.keys(schema.properties);
   const grouped = new Set(schema.at_least_one_of ?? []);
 
@@ -98,7 +99,7 @@ export function TaskForm({ cap, targets }: { cap: Capability; targets: Target[] 
         )}
 
         <WatchControl features={features.data} pref={watch} setPref={setWatch} />
-        {commits && !dryRun && watch.mode !== "off" && <p className="small muted">This one waits for approval, so you'll watch it once someone approves.</p>}
+        {commits && !dryRun && !atStep && watch.mode !== "off" && <p className="small muted">This one waits for approval, so you'll watch it once someone approves.</p>}
 
         <details>
           <summary className="small muted" style={{ cursor: "pointer" }}>Advanced: idempotency key</summary>
@@ -110,8 +111,9 @@ export function TaskForm({ cap, targets }: { cap: Capability; targets: Target[] 
 
         {serverError && <div className="banner bad" role="alert"><div className="grow"><strong>Couldn't start the run</strong><span>{serverError}</span></div></div>}
         <div className="row">
-          <button className="btn primary" disabled={busy}>{busy ? "Submitting…" : commits && !dryRun ? `Submit for ${cap.risk.approval_required ?? "approval"} approval` : dryRun ? "Rehearse" : "Run"}</button>
-          {commits && !dryRun && <span className="small muted">Nothing is done until a {cap.risk.approval_required} approves it.</span>}
+          <button className="btn primary" disabled={busy}>{busy ? "Submitting…" : commits && !dryRun && !atStep ? `Submit for ${cap.risk.approval_required ?? "approval"} approval` : dryRun ? "Rehearse" : "Run"}</button>
+          {commits && !dryRun && !atStep && <span className="small muted">Nothing is done until a {cap.risk.approval_required} approves it.</span>}
+          {atStep && !dryRun && <span className="small muted">It runs up to the final step, then waits for a {cap.risk.approval_required} to approve it. Nothing is committed until then.</span>}
         </div>
       </div>
     </form>

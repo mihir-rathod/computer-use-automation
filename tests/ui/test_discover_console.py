@@ -66,7 +66,7 @@ def test_a_supervisor_describes_a_task_in_words_and_it_is_discovered_and_made_av
     expect(page.get_by_text("This task is in use")).to_be_visible()
 
     console.open(page, "alex")
-    expect(page.get_by_text("Look up an appointment")).to_be_visible()
+    expect(page.get_by_text("Look up an appointment", exact=True)).to_be_visible()
 
 
 def test_the_draft_asks_a_question_when_an_example_is_missing(page, console, monkeypatch):

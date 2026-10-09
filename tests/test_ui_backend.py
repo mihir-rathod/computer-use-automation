@@ -81,9 +81,9 @@ def test_screenshots_are_for_operators_and_cannot_be_used_to_read_other_files(ap
 def test_inbox_collects_everything_waiting_for_a_person(api, clinic_base_url):
     assert api.get("/v1/inbox", headers=api.h("vic")).json()["counts"]["total"] == 0
     refund = {"invoice": "INV-30001", "amount": "10.00", "reason": "duplicate_payment"}
-    pending = submit(api, "alex", "clinic.issue_refund", refund).json()["id"]
+    pending = submit(api, "alex", "clinic.issue_refund", refund, pause_for_human=False).json()["id"]
     chaos(clinic_base_url, "error500_after", method="POST", path_glob="/legacy/transactions/confirm")
-    lost = submit(api, "alex", "clinic.issue_refund", {**refund, "amount": "11.00"}).json()["id"]
+    lost = submit(api, "alex", "clinic.issue_refund", {**refund, "amount": "11.00"}, pause_for_human=False).json()["id"]
     api.post(f"/v1/runs/{lost}/approve", json={"reason": "ok"}, headers=api.h("dana"))
     wait(api, lost)
     httpx.post(f"{clinic_base_url}/_test/drift", json={"level": 2, "seed": "ib"}, timeout=5)
@@ -205,12 +205,68 @@ def test_chat_tells_the_model_todays_date(api, model):
     assert f"Today is {datetime.now():%A}, {datetime.now():%Y-%m-%d}" in model.instructions[0]
 
 
+@pytest.mark.parametrize("value, kind, said, supported", [
+    ("2026-10-09", "date", "Change appointment A-20002 to 4PM", False),                    # the model supplied tomorrow itself
+    ("12:00", "time", "Move A-20002 to 03/12/2026", False),                                # the 12 is a day
+    ("10:00", "time", "Change A-20002 to the 4th of March", False),
+    ("2026-03-12", "date", "Move A-20002 to 03/12/2026", True),
+    ("16:00", "time", "Change appointment A-20002 to 4PM", True),
+    ("16:15", "time", "Change appointment A-20002 to 4:15 in the afternoon on March 4, 2026", True),
+    ("2026-03-04", "date", "Change A-20002 to the 4th of March", True),
+    ("2026-10-09", "date", "Move A-20002 to tomorrow at 4pm", True),
+    ("12:00", "time", "Reschedule A-20002 to 2026-03-04 at noon", True),
+    ("16:00", "time", "Reschedule A-20002 to 03/04/2026 at four", True),
+])
+def test_chat_only_accepts_a_date_or_time_the_users_words_support(value, kind, said, supported):
+    pattern = chat_v1._DATE_PATTERN if kind == "date" else chat_v1._TIME_PATTERN
+    assert chat_v1._supported_by(value, pattern, said) is supported
+
+
+RESCHEDULE = "clinic__reschedule_appointment"
+LOOKUP = "clinic__look_up_appointment"
+
+
+def test_changing_only_the_time_looks_up_the_date_and_keeps_it(api, model):
+    # the model first guesses a date; chat drops it (the user never said one), looks the appointment up, and lets the model finish from what was found
+    model.script = [("call", (RESCHEDULE, {"appointment": "A-20002", "date": "2026-10-09", "time": "16:30"})),
+                    ("call", (LOOKUP, {"appointment_id": "A-20002"})),
+                    ("call", (RESCHEDULE, {"appointment": "A-20002", "date": "2026-03-04", "time": "16:30"}))]
+    reply = say(api, "alex", "Change appointment A-20002 to 4:30PM").json()["messages"][1]
+
+    assert reply["text"].startswith("I looked up A-20002 to fill in the date.") and "date: 2026-03-04" in reply["text"] and "time: 16:30" in reply["text"]
+    run = api.get(f"/v1/runs/{reply['run_id']}", headers=api.h("alex")).json()
+    assert run["capability_id"] == "clinic.reschedule_appointment" and run["params"]["date"] == "2026-03-04" and run["requested_by"] == "alex"
+    lookups = [r for r in api.get("/v1/runs", headers=api.h("alex")).json()["runs"] if r["capability_id"] == "clinic.look_up_appointment"]
+    assert len(lookups) == 1 and lookups[0]["status"] == "success" and not lookups[0]["committed"]
+    assert len(model.seen) == 3 and "date" in model.instructions[1]
+    assert wait(api, reply["run_id"])["status"] == "success"  # let it finish: the next test resets the clinic, and a run still going would get stuck and hold the process open
+
+
+def test_when_the_lookup_finds_nothing_chat_asks_instead_of_guessing(api, model):
+    model.script = [("call", (RESCHEDULE, {"appointment": "A-29999", "time": "16:00"})), ("call", (LOOKUP, {"appointment_id": "A-29999"}))]
+    reply = say(api, "alex", "Change appointment A-29999 to 4PM").json()["messages"][1]
+
+    assert "didn't work" in reply["text"] and reply["run_id"] is None
+    assert [r["capability_id"] for r in api.get("/v1/runs", headers=api.h("alex")).json()["runs"]] == ["clinic.look_up_appointment"]  # nothing was rescheduled
+
+
+def test_a_value_with_nothing_to_look_up_is_just_asked_for(api, model):
+    model.script = [("call", (RESCHEDULE, {"time": "16:00"}))]
+    reply = say(api, "alex", "Change it to 4PM").json()["messages"][1]
+
+    assert "I still need: appointment, date" in reply["text"] and reply["run_id"] is None and api.get("/v1/runs", headers=api.h("alex")).json()["runs"] == []
+
+
 def test_chat_never_bypasses_approval_and_cannot_approve(api, model):
     model.script = [("call", ("clinic__issue_refund", {"invoice": "INV-30001", "amount": "10.00", "reason": "duplicate_payment"}))]
     reply = say(api, "alex", "refund 10 dollars on INV-30001, duplicate payment").json()["messages"][1]
-    run = api.get(f"/v1/runs/{reply['run_id']}", headers=api.h("vic")).json()
-    assert run["status"] == "pending_approval"
-    assert api.post(f"/v1/runs/{reply['run_id']}/approve", json={"reason": "x"}, headers=api.h("alex")).status_code == 403
+    end = time.time() + 60
+    while time.time() < end and not (run := api.get(f"/v1/runs/{reply['run_id']}", headers=api.h("vic")).json())["awaiting_approval"]:
+        time.sleep(0.3)
+    assert run["awaiting_approval"]["tier"] == "supervisor" and not run["committed"]  # it went as far as the irreversible step and stopped
+    assert api.post(f"/v1/runs/{reply['run_id']}/approval/approve", json={"reason": "x"}, headers=api.h("alex")).status_code == 403
+    api.post(f"/v1/runs/{reply['run_id']}/approval/reject", json={"reason": "test"}, headers=api.h("dana"))
+    assert wait(api, reply["run_id"])["status"] == "hard_failure"  # let it end: a run still waiting would hold a browser for the next test
 
 
 def test_chat_can_be_cleared_and_a_viewer_cannot_start_runs(api, model):
